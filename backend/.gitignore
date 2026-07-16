@@ -1,0 +1,18 @@
+# Environments
+venv/
+.env
+
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django
+db.sqlite3
+db.sqlite3-3
+*.log
+staticfiles/
+media/
+
+# Distribution / packaging
+*.egg-info/
