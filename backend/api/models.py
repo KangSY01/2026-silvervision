@@ -154,8 +154,15 @@ class ExerciseSession(models.Model):
     exercise = models.ForeignKey(
         Exercise, on_delete=models.CASCADE, db_column='exercise_id',
     )
-    completion_rate = models.DecimalField(max_digits=5, decimal_places=2)
-    accuracy_avg = models.DecimalField(max_digits=5, decimal_places=2)
+    # 세션 시작 시점엔 아직 값이 없으므로 nullable. 0.00을 기본값으로
+    # 채우면 "아직 측정 안 됨"과 "실제로 0% 달성"을 구분할 수 없어
+    # RankingSnapshot.rank_position과 동일한 이유로 NULL을 택했다.
+    completion_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+    )
+    accuracy_avg = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
