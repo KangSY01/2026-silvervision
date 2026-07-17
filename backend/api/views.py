@@ -4,9 +4,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Guardian, Senior
+from .models import ExerciseMission, Guardian, Senior
 from .permissions import IsGuardianSelf, IsSeniorSelf
 from .serializers import (
+    ExerciseMissionCreateSerializer,
+    ExerciseMissionSerializer,
+    ExerciseMissionStatusUpdateSerializer,
     GuardianLoginSerializer,
     GuardianProfileSerializer,
     GuardianRegisterSerializer,
@@ -119,3 +122,56 @@ class GuardianDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = (IsGuardianSelf,)
     lookup_field = 'pk'
     lookup_url_kwarg = 'guardian_id'
+
+
+class ExerciseMissionListCreateView(generics.ListCreateAPIView):
+    """
+    IsSeniorSelf가 URL의 senior_id와 토큰 본인이 일치하는지만 확인하므로,
+    쿼리셋도 반드시 그 senior_id로 한 번 더 필터링해 다른 시니어의
+    미션이 섞여 나오지 않게 한다.
+    """
+    permission_classes = (IsSeniorSelf,)
+
+    def get_queryset(self):
+        return ExerciseMission.objects.filter(
+            senior_id=self.kwargs['senior_id']
+        ).select_related('exercise')
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return ExerciseMissionCreateSerializer
+        return ExerciseMissionSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        # body에 담긴 senior 값과 URL의 senior_id가 다르더라도 URL 쪽을
+        # 우선시해 무조건 request.user(=IsSeniorSelf로 이미 본인 확인된
+        # 시니어)로 덮어쓴다. IsSeniorSelf가 URL senior_id == 본인임을
+        # 보장하므로 body 값을 신뢰할 이유가 없고, 불일치를 에러로
+        # 처리하면 클라이언트가 매번 URL과 동일한 값을 body에도 넣어야
+        # 하는 불필요한 제약만 생긴다.
+        mission = serializer.save(senior=request.user)
+        output = ExerciseMissionSerializer(mission)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
+class ExerciseMissionStatusUpdateView(generics.UpdateAPIView):
+    """
+    status만 변경하는 PATCH 전용 엔드포인트. mission_id가 URL의
+    senior_id 소속이 아니면(다른 시니어의 미션 id를 넣은 경우)
+    get_queryset()의 필터링 때문에 애초에 조회되지 않아 404가 된다.
+    senior_id 자체가 본인이 아닌 경우는 IsSeniorSelf가 403으로 먼저
+    막는다 - "존재하지 않는 자원"과 "권한 없음"을 계층별로 분리한
+    형태다.
+    """
+    serializer_class = ExerciseMissionStatusUpdateSerializer
+    permission_classes = (IsSeniorSelf,)
+    lookup_field = 'pk'
+    lookup_url_kwarg = 'mission_id'
+    http_method_names = ['patch']
+
+    def get_queryset(self):
+        return ExerciseMission.objects.filter(
+            senior_id=self.kwargs['senior_id']
+        )

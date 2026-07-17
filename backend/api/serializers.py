@@ -131,6 +131,20 @@ class ExerciseMissionCreateSerializer(serializers.ModelSerializer):
         fields = ('senior', 'exercise', 'scheduled_at')
 
 
+class ExerciseMissionStatusUpdateSerializer(serializers.ModelSerializer):
+    """
+    PATCH으로 status만 변경하기 위한 전용 시리얼라이저. status는 모델의
+    choices(pending/completed/skipped)로 정의돼 있어 ModelSerializer가
+    자동으로 유효하지 않은 값을 400으로 거부한다. senior/exercise/
+    scheduled_at은 노출하지 않아 상태 변경 요청으로 다른 필드가 함께
+    바뀔 수 없다.
+    """
+    class Meta:
+        model = ExerciseMission
+        fields = ('mission_id', 'status')
+        read_only_fields = ('mission_id',)
+
+
 class ExerciseSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExerciseSession
