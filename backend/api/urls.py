@@ -24,6 +24,14 @@ urlpatterns = [
     ),
 
     # 계정 관련 URL
+    path(
+        'senior/<int:senior_id>/', views.SeniorDetailView.as_view(),
+        name='senior-detail',
+    ),
+    path(
+        'guardian/<int:guardian_id>/', views.GuardianDetailView.as_view(),
+        name='guardian-detail',
+    ),
 
     # 운동 관련 URL
 
