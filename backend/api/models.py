@@ -279,7 +279,7 @@ class ActivityLog(models.Model):
 class RankingSnapshot(models.Model):
     class RankScope(models.TextChoices):
         NATIONAL = 'national', '전국'
-        REGION = 'region', '지역'
+        REGIONAL = 'regional', '지역'
 
     snapshot_id = models.BigAutoField(primary_key=True)
     senior = models.ForeignKey(
@@ -288,14 +288,11 @@ class RankingSnapshot(models.Model):
     score = models.IntegerField()
     snapshot_date = models.DateField()
     rank_scope = models.CharField(max_length=20, choices=RankScope.choices)
-    rank_position = models.IntegerField()
+    rank_position = models.IntegerField(null=True, blank=True)
 
     class Meta:
         db_table = 'ranking_snapshot'
         unique_together = ('senior', 'snapshot_date', 'rank_scope')
 
     def __str__(self):
-        return (
-            f'{self.senior_id} - {self.rank_scope} #{self.rank_position} '
-            f'({self.snapshot_date})'
-        )
+        return f'{self.senior_id} - {self.rank_scope} #{self.rank_position} ({self.snapshot_date})'

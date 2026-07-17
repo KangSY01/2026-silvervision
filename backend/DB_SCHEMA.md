@@ -195,7 +195,7 @@
 | `senior_id` | BIGINT, FK → `senior.senior_id` | |
 | `score` | INT | 순위 산정용 점수 |
 | `snapshot_date` | DATE | 스냅샷 산출 일자 |
-| `rank_scope` | VARCHAR (ENUM 대응) | `national`(전국) / `region`(지역) |
+| `rank_scope` | VARCHAR (ENUM 대응) | `national`(전국) / `regional`(지역) |
 | `rank_position` | INT | 해당 scope 내 순위 (예: 전국 247위) |
 
 - `(senior_id, snapshot_date, rank_scope)` UNIQUE 제약 (같은 시니어가 같은 날 같은 scope로 중복 스냅샷을 갖지 않도록)

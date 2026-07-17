@@ -108,7 +108,7 @@ class ActivityLogAdmin(admin.ModelAdmin):
 @admin.register(RankingSnapshot)
 class RankingSnapshotAdmin(admin.ModelAdmin):
     list_display = (
-        'snapshot_id', 'senior', 'rank_scope', 'rank_position', 'score',
-        'snapshot_date',
+        'snapshot_id', 'senior', 'rank_scope', 'rank_position',
+        'score', 'snapshot_date',
     )
     list_filter = ('rank_scope', 'snapshot_date')
