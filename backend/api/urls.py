@@ -34,6 +34,16 @@ urlpatterns = [
     ),
 
     # 운동 관련 URL
+    path(
+        'senior/<int:senior_id>/missions/',
+        views.ExerciseMissionListCreateView.as_view(),
+        name='senior-mission-list',
+    ),
+    path(
+        'senior/<int:senior_id>/missions/<int:mission_id>/',
+        views.ExerciseMissionStatusUpdateView.as_view(),
+        name='senior-mission-status-update',
+    ),
 
     # 기록 관련 URL
 
