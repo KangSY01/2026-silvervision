@@ -1,8 +1,13 @@
 import uuid
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
+    ActivityLog,
+    CameraAccessGrant,
+    EmergencyEvent,
+    EmergencyNotification,
     Exercise,
     ExerciseMission,
     ExerciseSession,
@@ -157,3 +162,71 @@ class PhysicalAbilityLogSerializer(serializers.ModelSerializer):
             'logged_date',
         )
         read_only_fields = ('log_id',)
+
+
+class EmergencyEventSerializer(serializers.ModelSerializer):
+    """
+    클라이언트(비전 모델/센서)가 낙상·무활동을 "감지했다"는 사실과 감지
+    출처(detection_source)를 기록만 한다. 낙상/무활동 여부를 판별하는
+    로직이나 임계치 계산은 AI 파트(온디바이스) 책임이며, 이 시리얼라이저
+    에는 절대 포함하지 않는다 (AGENTS.md 3장 'AI 모델 경계' 참고).
+
+    status는 모델 기본값('detected')에 맡기고 입력 필드에서 제외한다.
+    클라이언트가 생성 요청에서 임의로 상태를 지정하지 못하게 하기 위함
+    이며, 상태 변경은 EmergencyEventStatusUpdateSerializer를 통해서만
+    이뤄진다.
+    """
+    class Meta:
+        model = EmergencyEvent
+        fields = (
+            'event_id', 'senior', 'event_type', 'detection_source',
+            'status', 'created_at',
+        )
+        read_only_fields = ('event_id', 'status', 'created_at')
+
+
+class EmergencyEventStatusUpdateSerializer(serializers.ModelSerializer):
+    """
+    담당자/보호자 측 대응 흐름에서 status만 변경하기 위한 PATCH 전용
+    시리얼라이저 (감지됨 -> 1차확인/오보/알림전송 -> 종료). 어떤 상태
+    전이가 허용되는지(예: 종료된 이벤트를 다시 감지됨으로 되돌릴 수
+    있는지)를 검증하는 전이 로직은 넣지 않았다 - 이는 AI 판별 로직은
+    아니지만 별도의 비즈니스 규칙 확인이 필요해 범위 밖으로 뒀다.
+    """
+    class Meta:
+        model = EmergencyEvent
+        fields = ('event_id', 'status')
+        read_only_fields = ('event_id',)
+
+
+class EmergencyNotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmergencyNotification
+        fields = ('notification_id', 'event', 'guardian', 'channel', 'sent_at')
+        read_only_fields = ('notification_id', 'sent_at')
+
+
+class CameraAccessGrantSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CameraAccessGrant
+        fields = ('grant_id', 'event', 'granted_at', 'expires_at')
+        read_only_fields = ('grant_id', 'granted_at')
+
+    def validate_expires_at(self, value):
+        # granted_at은 auto_now_add라 저장 시점의 현재 시각으로 채워지므로,
+        # expires_at이 "지금" 이후인지 확인하는 것이 granted_at 이후인지
+        # 확인하는 것과 사실상 동일하다. 낙상 여부나 응급 상황을 판단하는
+        # 로직이 아니라 만료 시각이 과거일 수 없다는 데이터 정합성만
+        # 검증하는 것이라 AI 모델 경계 밖의 일반적인 입력 검증으로 판단했다.
+        if value <= timezone.now():
+            raise serializers.ValidationError(
+                'expires_at은 현재 시각 이후여야 합니다.'
+            )
+        return value
+
+
+class ActivityLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActivityLog
+        fields = ('log_id', 'senior', 'activity_type', 'logged_at')
+        read_only_fields = ('log_id', 'logged_at')
