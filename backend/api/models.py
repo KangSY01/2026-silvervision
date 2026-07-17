@@ -264,3 +264,28 @@ class ActivityLog(models.Model):
 
     def __str__(self):
         return f'{self.senior_id} - {self.activity_type} @ {self.logged_at}'
+
+
+class RankingSnapshot(models.Model):
+    class RankScope(models.TextChoices):
+        NATIONAL = 'national', '전국'
+        REGION = 'region', '지역'
+
+    snapshot_id = models.BigAutoField(primary_key=True)
+    senior = models.ForeignKey(
+        Senior, on_delete=models.CASCADE, db_column='senior_id',
+    )
+    score = models.IntegerField()
+    snapshot_date = models.DateField()
+    rank_scope = models.CharField(max_length=20, choices=RankScope.choices)
+    rank_position = models.IntegerField()
+
+    class Meta:
+        db_table = 'ranking_snapshot'
+        unique_together = ('senior', 'snapshot_date', 'rank_scope')
+
+    def __str__(self):
+        return (
+            f'{self.senior_id} - {self.rank_scope} #{self.rank_position} '
+            f'({self.snapshot_date})'
+        )

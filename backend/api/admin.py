@@ -12,6 +12,7 @@ from .models import (
     GuardianSeniorMap,
     PhysicalAbilityLog,
     PoseFeedback,
+    RankingSnapshot,
     Senior,
 )
 
@@ -102,3 +103,12 @@ class CameraAccessGrantAdmin(admin.ModelAdmin):
 class ActivityLogAdmin(admin.ModelAdmin):
     list_display = ('log_id', 'senior', 'activity_type', 'logged_at')
     list_filter = ('activity_type',)
+
+
+@admin.register(RankingSnapshot)
+class RankingSnapshotAdmin(admin.ModelAdmin):
+    list_display = (
+        'snapshot_id', 'senior', 'rank_scope', 'rank_position', 'score',
+        'snapshot_date',
+    )
+    list_filter = ('rank_scope', 'snapshot_date')
