@@ -1,5 +1,6 @@
 import uuid
 
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -153,6 +154,52 @@ class ExerciseSessionSerializer(serializers.ModelSerializer):
             'completion_rate', 'accuracy_avg', 'created_at',
         )
         read_only_fields = ('session_id', 'created_at')
+
+
+class ExerciseSessionStartSerializer(serializers.ModelSerializer):
+    """
+    세션 시작 시점엔 mission만 받는다. senior는 URL/토큰에서, exercise는
+    mission.exercise에서 서버가 채운다(view에서 처리) - 클라이언트가
+    mission과 다른 exercise를 보내 세션-미션이 불일치하는 상황을 막는다.
+    completion_rate/accuracy_avg는 종료 전까지 알 수 없는 값이라 이
+    시리얼라이저에는 포함하지 않는다.
+    """
+    class Meta:
+        model = ExerciseSession
+        fields = ('session_id', 'mission', 'senior', 'exercise', 'created_at')
+        read_only_fields = ('session_id', 'senior', 'exercise', 'created_at')
+
+    def validate_mission(self, value):
+        senior_id = self.context.get('senior_id')
+        if value.senior_id != senior_id:
+            raise serializers.ValidationError(
+                '해당 미션은 이 시니어 소속이 아닙니다.'
+            )
+        return value
+
+
+class ExerciseSessionCompleteSerializer(serializers.ModelSerializer):
+    """
+    PATCH 전용 - completion_rate/accuracy_avg만 받는다. PATCH는 부분
+    수정이 기본이라 두 필드 모두 optional로 두되(둘 중 하나만 먼저
+    도착해도 처리 가능), 값이 오면 0~100 범위인지는 검증한다. AI가
+    계산한 값을 그대로 신뢰하는 것과 별개로, 형태가 이상한 입력값
+    (예: 150.00)까지 그대로 저장하는 건 시스템 경계에서의 일반적인
+    입력 검증 문제라 여기 추가했다.
+    """
+    completion_rate = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    accuracy_avg = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+
+    class Meta:
+        model = ExerciseSession
+        fields = ('session_id', 'completion_rate', 'accuracy_avg')
+        read_only_fields = ('session_id',)
 
 
 class PoseFeedbackListSerializer(serializers.ListSerializer):

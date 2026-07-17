@@ -46,6 +46,21 @@ urlpatterns = [
     ),
 
     # 기록 관련 URL
+    path(
+        'senior/<int:senior_id>/sessions/',
+        views.ExerciseSessionStartView.as_view(),
+        name='senior-session-start',
+    ),
+    path(
+        'senior/<int:senior_id>/sessions/<int:session_id>/',
+        views.ExerciseSessionCompleteView.as_view(),
+        name='senior-session-complete',
+    ),
+    path(
+        'senior/<int:senior_id>/sessions/<int:session_id>/feedback/',
+        views.SessionFeedbackCreateView.as_view(),
+        name='senior-session-feedback',
+    ),
 
     # 응급 관련 URL
 

@@ -117,8 +117,10 @@
 | `mission_id` | BIGINT, FK → `exercise_mission.mission_id` | |
 | `senior_id` | BIGINT, FK → `senior.senior_id` | |
 | `exercise_id` | BIGINT, FK → `exercise.exercise_id` | |
-| `completion_rate` | DECIMAL | 달성률 |
-| `accuracy_avg` | DECIMAL | 동작 일치도 평균 |
+| `completion_rate` | DECIMAL, NULL 허용 | 달성률 (세션 시작 시점엔 NULL, 종료 시 채워짐) |
+| `accuracy_avg` | DECIMAL, NULL 허용 | 동작 일치도 평균 (세션 시작 시점엔 NULL, 종료 시 채워짐) |
+
+**변경 (v2.2, 2026-07-17)**: `POST /senior/{id}/sessions/`(세션 시작)에서 아직 계산되지 않은 값을 요구하지 않도록 `completion_rate`/`accuracy_avg`를 nullable로 변경. 0.00 기본값 대신 NULL을 택한 이유는 `ranking_snapshot.rank_position`과 동일(미측정과 실제 0점을 구분하기 위함).
 
 ### `pose_feedback` — 관절 각도 기반 피드백 상세
 

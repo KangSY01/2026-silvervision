@@ -1,18 +1,23 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import ExerciseMission, Guardian, Senior
+from .models import ExerciseMission, ExerciseSession, Guardian, Senior
 from .permissions import IsGuardianSelf, IsSeniorSelf
 from .serializers import (
     ExerciseMissionCreateSerializer,
     ExerciseMissionSerializer,
     ExerciseMissionStatusUpdateSerializer,
+    ExerciseSessionCompleteSerializer,
+    ExerciseSessionSerializer,
+    ExerciseSessionStartSerializer,
     GuardianLoginSerializer,
     GuardianProfileSerializer,
     GuardianRegisterSerializer,
+    PoseFeedbackSerializer,
     SeniorLoginSerializer,
     SeniorProfileSerializer,
     SeniorRegisterSerializer,
@@ -175,3 +180,81 @@ class ExerciseMissionStatusUpdateView(generics.UpdateAPIView):
         return ExerciseMission.objects.filter(
             senior_id=self.kwargs['senior_id']
         )
+
+
+class ExerciseSessionStartView(generics.CreateAPIView):
+    """
+    body에서 mission만 받는다. senior_id 소속이 아닌 mission을 보내면
+    ExerciseSessionStartSerializer.validate_mission이 400으로 거부한다
+    (URL이 아니라 body로 들어온 참조값의 유효성 문제라 403/404가 아닌
+    400을 택했다 - V6에서 URL 자체가 가리키는 자원에 대한 권한 문제를
+    403/404로 구분한 것과는 다른 범주).
+    """
+    serializer_class = ExerciseSessionStartSerializer
+    permission_classes = (IsSeniorSelf,)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['senior_id'] = self.kwargs['senior_id']
+        return context
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        mission = serializer.validated_data['mission']
+        session = serializer.save(
+            senior=request.user, exercise=mission.exercise,
+        )
+        output = ExerciseSessionSerializer(session)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
+class ExerciseSessionCompleteView(generics.UpdateAPIView):
+    """
+    completion_rate/accuracy_avg 저장 전용 PATCH. session_id가 URL의
+    senior_id 소속이 아니면 get_queryset() 필터링 때문에 조회되지 않아
+    404가 된다 (V6의 미션 PATCH와 동일한 기준).
+    """
+    serializer_class = ExerciseSessionCompleteSerializer
+    permission_classes = (IsSeniorSelf,)
+    lookup_field = 'pk'
+    lookup_url_kwarg = 'session_id'
+    http_method_names = ['patch']
+
+    def get_queryset(self):
+        return ExerciseSession.objects.filter(
+            senior_id=self.kwargs['senior_id']
+        )
+
+
+class SessionFeedbackCreateView(generics.CreateAPIView):
+    """
+    관절별 편차 여러 건을 한 번에 저장한다(PoseFeedbackListSerializer
+    재사용, bulk_create). 세션이 이미 종료(completion_rate 등이 채워짐)
+    됐는지는 확인하지 않는다 - 실제 사용 흐름상 피드백은 운동 도중
+    실시간으로 쌓이고 completion_rate/accuracy_avg는 끝난 뒤 한 번에
+    보내는 것이 더 자연스러워서, 순서를 강제하면 그 흐름을 막을 뿐
+    데이터 정합성 이점은 없다고 판단했다.
+
+    각 항목의 session 값은 URL의 session_id로 강제 덮어써서(V6의
+    "URL이 우선" 패턴과 동일) 클라이언트가 다른 세션에 피드백을
+    끼워넣지 못하게 한다. session_id 자체가 URL의 senior_id 소속이
+    아니면 404.
+    """
+    serializer_class = PoseFeedbackSerializer
+    permission_classes = (IsSeniorSelf,)
+
+    def create(self, request, *args, **kwargs):
+        session = get_object_or_404(
+            ExerciseSession,
+            pk=self.kwargs['session_id'],
+            senior_id=self.kwargs['senior_id'],
+        )
+        items = request.data if isinstance(request.data, list) else [request.data]
+        payload = [
+            {**item, 'session': session.session_id} for item in items
+        ]
+        serializer = self.get_serializer(data=payload, many=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
