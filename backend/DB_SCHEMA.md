@@ -194,8 +194,14 @@
 | `snapshot_id` | BIGINT, PK | |
 | `senior_id` | BIGINT, FK → `senior.senior_id` | |
 | `score` | INT | 순위 산정용 점수 |
+| `snapshot_date` | DATE | 스냅샷 산출 일자 |
+| `rank_scope` | VARCHAR (ENUM 대응) | `national`(전국) / `regional`(지역) |
+| `rank_position` | INT | 해당 scope 내 순위 (예: 전국 247위) |
 
-- 전국 순위/지역 순위는 이 스냅샷 테이블을 기준으로 별도 배치·쿼리에서 산출 (지역 정보는 `senior.address` 참고)
+- `(senior_id, snapshot_date, rank_scope)` UNIQUE 제약 (같은 시니어가 같은 날 같은 scope로 중복 스냅샷을 갖지 않도록)
+- 전국 순위/지역 순위는 이 스냅샷 테이블을 기준으로 별도 배치·쿼리에서 산출 (지역 정보는 `senior.address` 참고). `score`/`rank_position` 계산 자체는 백엔드가 아닌 배치 프로세스의 책임이며, API는 이미 계산된 스냅샷 값을 조회용으로 노출한다.
+
+**변경 (v2.1, 2026-07-17)**: 착수 시점 스키마에는 `score`만 있었으나, `/senior/{id}/ranking/` 조회 API 설계 과정에서 순위 표시(예: "전국 247위")에 필요한 `snapshot_date`/`rank_scope`/`rank_position`이 누락되어 있음을 확인해 추가.
 
 ---
 

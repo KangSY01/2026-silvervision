@@ -24,6 +24,12 @@ class Senior(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Django AbstractBaseUser가 아니므로 DRF의 IsAuthenticated 등이 참조하는
+    # is_authenticated/is_anonymous가 없다. AbstractBaseUser와 동일하게
+    # 값이 아닌 상수로 정의한다 (인증된 요청에만 이 인스턴스가 붙으므로 항상 True).
+    is_authenticated = True
+    is_anonymous = False
+
     class Meta:
         db_table = 'senior'
 
@@ -46,6 +52,10 @@ class Guardian(models.Model):
     address = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # Senior와 동일한 이유로 is_authenticated/is_anonymous를 상수로 정의한다.
+    is_authenticated = True
+    is_anonymous = False
 
     class Meta:
         db_table = 'guardian'

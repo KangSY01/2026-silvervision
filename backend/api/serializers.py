@@ -14,6 +14,7 @@ from .models import (
     Guardian,
     PhysicalAbilityLog,
     PoseFeedback,
+    RankingSnapshot,
     Senior,
 )
 
@@ -230,3 +231,30 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         model = ActivityLog
         fields = ('log_id', 'senior', 'activity_type', 'logged_at')
         read_only_fields = ('log_id', 'logged_at')
+
+
+class RankingSnapshotSerializer(serializers.ModelSerializer):
+    """
+    조회 전용: 이미 배치 프로세스가 계산해 저장해 둔 순위 스냅샷 한 건을
+    그대로 노출할 뿐, 점수/순위를 산정하는 로직은 포함하지 않는다.
+
+    이건 AGENTS.md 3장의 'AI 모델 경계'와는 다른 종류의 경계다 - 저기서
+    빠지는 건 온디바이스 AI(낙상 판별 등)의 몫이고, 여기서 빠지는 건
+    별도 배치 프로세스(순위 집계 쿼리/스케줄 작업)의 몫이다. 다만
+    "백엔드는 이미 계산된 결과값만 저장·조회한다"는 원칙 자체는 동일하게
+    적용된다.
+
+    전국/지역 순위를 한 응답에 어떻게 묶어 보여줄지(별도 필드 vs 배열)는
+    이 시리얼라이저가 아니라 이를 사용하는 views.py의 몫이라 여기서는
+    스냅샷 레코드 하나만 표현한다.
+    """
+    class Meta:
+        model = RankingSnapshot
+        fields = (
+            'snapshot_id', 'senior', 'score', 'snapshot_date',
+            'rank_scope', 'rank_position',
+        )
+        read_only_fields = (
+            'snapshot_id', 'senior', 'score', 'snapshot_date',
+            'rank_scope', 'rank_position',
+        )
