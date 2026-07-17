@@ -4,9 +4,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Guardian, Senior
+from .models import Exercise, Guardian, Senior
 from .permissions import IsGuardianSelf, IsSeniorSelf
 from .serializers import (
+    ExerciseSerializer,
     GuardianLoginSerializer,
     GuardianProfileSerializer,
     GuardianRegisterSerializer,
@@ -119,3 +120,23 @@ class GuardianDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = (IsGuardianSelf,)
     lookup_field = 'pk'
     lookup_url_kwarg = 'guardian_id'
+
+
+class ExerciseListView(generics.ListAPIView):
+    """
+    운동 콘텐츠는 특정 사용자에 종속되지 않는 공개 마스터 데이터라
+    로그인 없이도 조회 가능하게 한다 (claude-security-guidance.md가
+    보호를 요구하는 대상은 비밀번호 해시/응급 데이터/카메라 접근 권한
+    등이며 운동 콘텐츠는 해당하지 않는다).
+    """
+    queryset = Exercise.objects.all()
+    serializer_class = ExerciseSerializer
+    permission_classes = (AllowAny,)
+
+
+class ExerciseDetailView(generics.RetrieveAPIView):
+    queryset = Exercise.objects.all()
+    serializer_class = ExerciseSerializer
+    permission_classes = (AllowAny,)
+    lookup_field = 'pk'
+    lookup_url_kwarg = 'exercise_id'

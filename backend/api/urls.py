@@ -34,6 +34,14 @@ urlpatterns = [
     ),
 
     # 운동 관련 URL
+    path(
+        'exercises/', views.ExerciseListView.as_view(),
+        name='exercise-list',
+    ),
+    path(
+        'exercises/<int:exercise_id>/', views.ExerciseDetailView.as_view(),
+        name='exercise-detail',
+    ),
 
     # 기록 관련 URL
 
