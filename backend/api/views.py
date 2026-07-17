@@ -1,10 +1,11 @@
-from rest_framework import status
+from rest_framework import generics, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Guardian, Senior
+from .permissions import IsGuardianSelf, IsSeniorSelf
 from .serializers import (
     GuardianLoginSerializer,
     GuardianProfileSerializer,
@@ -95,3 +96,26 @@ class GuardianLoginView(APIView):
             )
 
         return Response(_issue_tokens('guardian', guardian.guardian_id))
+
+
+class SeniorDetailView(generics.RetrieveUpdateAPIView):
+    """
+    본인 프로필 조회/수정. IsSeniorSelf가 role(Senior)과 URL의
+    senior_id가 토큰 본인과 일치하는지 함께 검증하므로, 다른 시니어의
+    id로 접근하면 403(권한 있음/본인 아님)으로 거부된다. 토큰 자체가
+    없거나 유효하지 않으면 DRF가 자동으로 401을 반환한다(인증 실패와
+    권한 거부를 구분하는 표준 동작).
+    """
+    queryset = Senior.objects.all()
+    serializer_class = SeniorProfileSerializer
+    permission_classes = (IsSeniorSelf,)
+    lookup_field = 'pk'
+    lookup_url_kwarg = 'senior_id'
+
+
+class GuardianDetailView(generics.RetrieveUpdateAPIView):
+    queryset = Guardian.objects.all()
+    serializer_class = GuardianProfileSerializer
+    permission_classes = (IsGuardianSelf,)
+    lookup_field = 'pk'
+    lookup_url_kwarg = 'guardian_id'
