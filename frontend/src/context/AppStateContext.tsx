@@ -1,7 +1,9 @@
 import { createContext, ReactNode, useContext, useState } from 'react';
 import { EmergencyEvent, Guardian, Senior, UserProfile } from '../types';
 
-// TODO: AuthContext/API 연결 후 실제 로그인 응답으로 교체
+// 로그인 전 초기값(플레이스홀더). LoginScreen이 로그인 성공 시 GET /senior/{id}/
+// 응답으로 setUserProfile()을 호출해 덮어쓰므로, 이 값은 로그인 화면 진입 전까지만
+// 존재하고 실제 화면(SeniorHome 등)에는 노출되지 않는다.
 const DEFAULT_PROFILE: UserProfile = {
   name: '김철수',
   id: 'silver123',
@@ -13,7 +15,8 @@ const DEFAULT_PROFILE: UserProfile = {
   medication: '혈압약 (아침 1정)',
 };
 
-// TODO: AuthContext/API 연결 후 실제 로그인 응답으로 교체
+// 로그인 전 초기값(플레이스홀더). GuardianLoginScreen이 로그인 성공 시
+// GET /guardian/{id}/ 응답으로 setGuardianProfile()을 호출해 덮어쓴다.
 const DEFAULT_GUARDIAN: Guardian = {
   name: '박보호',
   id: 'guardian1',

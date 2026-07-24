@@ -20,6 +20,27 @@ export interface LoginTokenResponse {
   refresh: string;
 }
 
+/** backend/api/serializers.py의 SeniorProfileSerializer 응답 형태 (GET /senior/{id}/). */
+export interface SeniorProfileResponse {
+  login_id: string;
+  name: string;
+  phone: string;
+  address: string;
+  diseases: string;
+  medication: string;
+  mobility_level: 'independent' | 'partial_assist' | 'full_assist';
+  barcode_code: string;
+  fruit_count: number;
+}
+
+/** backend/api/serializers.py의 GuardianProfileSerializer 응답 형태 (GET /guardian/{id}/). */
+export interface GuardianProfileResponse {
+  login_id: string;
+  name: string;
+  phone: string;
+  address: string;
+}
+
 const STORAGE_KEYS = {
   accessToken: 'silvervision.auth.accessToken',
   refreshToken: 'silvervision.auth.refreshToken',
@@ -124,6 +145,22 @@ export class ApiError extends Error {
     this.status = status;
     this.payload = payload;
   }
+}
+
+/**
+ * ApiError에서 화면에 그대로 보여줄 수 있는 메시지를 뽑는다. 백엔드가 401/커스텀
+ * 400에서 { detail: string }을 주는 경우(로그인 자격 증명 오류, 네트워크 실패 등)만
+ * 다루고, 필드별 검증 에러({ field: string[] } 형태)는 화면마다 의미가 달라 여기서
+ * 일반화하지 않는다 - 그 경우는 fallback 메시지로 대체한다.
+ */
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    const detail = error.payload?.detail;
+    if (typeof detail === 'string') {
+      return detail;
+    }
+  }
+  return fallback;
 }
 
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';

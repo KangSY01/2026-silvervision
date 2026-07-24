@@ -2,6 +2,13 @@ import { useNavigation } from '@react-navigation/native';
 import { ArrowLeft, Info, KeyRound, User } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  apiClient,
+  getApiErrorMessage,
+  LoginTokenResponse,
+  persistSessionFromLoginResponse,
+  SeniorProfileResponse,
+} from '../../api/client';
 import { useAppState } from '../../context/AppStateContext';
 import {
   colors,
@@ -11,14 +18,25 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
-import { UserProfile } from '../../types';
+import { ActivityLevel, UserProfile } from '../../types';
+
+// SeniorProfileResponse.mobility_level(백엔드 enum) -> ActivityLevel(화면 표시용 한글 라벨)
+const MOBILITY_LEVEL_TO_ACTIVITY_LEVEL: Record<
+  SeniorProfileResponse['mobility_level'],
+  ActivityLevel
+> = {
+  independent: '독립',
+  partial_assist: '부분 보조',
+  full_assist: '완전 보조',
+};
 
 export default function LoginScreen() {
   const navigation = useNavigation();
-  const { userProfile, setUserProfile } = useAppState();
+  const { setUserProfile } = useAppState();
   const [id, setId] = useState('silver99');
   const [pw, setPw] = useState('1234');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [idFocused, setIdFocused] = useState(false);
   const [pwFocused, setPwFocused] = useState(false);
 
@@ -26,20 +44,45 @@ export default function LoginScreen() {
     navigation.goBack();
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!id.trim() || !pw.trim()) {
       setError('아이디와 비밀번호를 모두 입력해주세요.');
       return;
     }
 
-    const profile: UserProfile = {
-      ...userProfile,
-      id,
-      pw,
-    };
+    setError('');
+    setLoading(true);
+    try {
+      const tokens = await apiClient.post<LoginTokenResponse>(
+        '/auth/senior/login/',
+        { login_id: id, password: pw },
+        { auth: false },
+      );
+      const session = await persistSessionFromLoginResponse(tokens);
+      const profileResponse = await apiClient.get<SeniorProfileResponse>(
+        `/senior/${session.userId}/`,
+      );
 
-    setUserProfile(profile);
-    navigation.navigate('SeniorHome');
+      const profile: UserProfile = {
+        id: profileResponse.login_id,
+        name: profileResponse.name,
+        phone: profileResponse.phone,
+        address: profileResponse.address,
+        diseases: profileResponse.diseases,
+        medication: profileResponse.medication,
+        activityLevel: MOBILITY_LEVEL_TO_ACTIVITY_LEVEL[profileResponse.mobility_level],
+        // 백엔드 응답에는 비밀번호가 없으므로(SeniorProfileSerializer에 password 필드
+        // 자체가 없음) 로그인 폼에 입력한 값을 그대로 보관한다 - 기존 목업 동작과 동일.
+        pw,
+      };
+
+      setUserProfile(profile);
+      navigation.navigate('SeniorHome');
+    } catch (err) {
+      setError(getApiErrorMessage(err, '로그인에 실패했습니다. 잠시 후 다시 시도해주세요.'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSignUp = () => {
@@ -116,9 +159,14 @@ export default function LoginScreen() {
       <View style={styles.actions}>
         <Pressable
           onPress={handleLogin}
-          style={({ pressed }) => [styles.primaryButton, pressed && styles.pressedPrimary]}
+          disabled={loading}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.pressedPrimary,
+            loading && styles.primaryButtonDisabled,
+          ]}
         >
-          <Text style={styles.primaryButtonText}>로그인 하기</Text>
+          <Text style={styles.primaryButtonText}>{loading ? '로그인 중...' : '로그인 하기'}</Text>
         </Pressable>
 
         <Pressable
@@ -239,6 +287,9 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.button,
     fontWeight: fontWeights.bold,
     color: colors.white,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.6,
   },
   secondaryButton: {
     minHeight: MIN_TOUCH_TARGET,
