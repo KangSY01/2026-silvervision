@@ -41,6 +41,21 @@ export interface GuardianProfileResponse {
   address: string;
 }
 
+/**
+ * backend/api/serializers.py의 ExerciseSerializer 응답 형태 (GET /exercises/,
+ * /exercises/{id}/). reference_angles는 온디바이스 AI가 관절 각도 편차를 계산할 때
+ * 쓰는 기준값이라 이 화면들에서 아직 소비하지 않아 구체 형태를 좁히지 않는다.
+ */
+export interface ExerciseResponse {
+  exercise_id: number;
+  name: string;
+  category: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  guide_image_url: string;
+  silhouette_url: string;
+  reference_angles: Record<string, unknown>;
+}
+
 const STORAGE_KEYS = {
   accessToken: 'silvervision.auth.accessToken',
   refreshToken: 'silvervision.auth.refreshToken',

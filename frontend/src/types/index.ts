@@ -40,10 +40,8 @@ export interface EmergencyEvent {
 }
 
 export interface Workout {
-  id: string;
+  id: number;
   name: string;
-  difficulty: '쉬움' | '보통';
-  duration: string;
-  description: string;
-  iconName: string;
+  category: string;
+  difficulty: '쉬움' | '보통' | '어려움';
 }
