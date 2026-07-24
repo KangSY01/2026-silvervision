@@ -3,6 +3,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Info, KeyRound, Shield, User } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  apiClient,
+  getApiErrorMessage,
+  GuardianProfileResponse,
+  LoginTokenResponse,
+  persistSessionFromLoginResponse,
+} from '../../api/client';
 import { useAppState } from '../../context/AppStateContext';
 import {
   colors,
@@ -20,6 +27,7 @@ export default function GuardianLoginScreen() {
   const [id, setId] = useState(guardianProfile.id || 'guardian1');
   const [pw, setPw] = useState(guardianProfile.pw || '1234');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [idFocused, setIdFocused] = useState(false);
   const [pwFocused, setPwFocused] = useState(false);
 
@@ -27,20 +35,42 @@ export default function GuardianLoginScreen() {
     navigation.navigate('Entry');
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!id.trim() || !pw.trim()) {
       setError('아이디와 비밀번호를 모두 입력해주세요.');
       return;
     }
 
-    const activeGuardian: Guardian = {
-      ...guardianProfile,
-      id,
-      pw,
-    };
+    setError('');
+    setLoading(true);
+    try {
+      const tokens = await apiClient.post<LoginTokenResponse>(
+        '/auth/guardian/login/',
+        { login_id: id, password: pw },
+        { auth: false },
+      );
+      const session = await persistSessionFromLoginResponse(tokens);
+      const profileResponse = await apiClient.get<GuardianProfileResponse>(
+        `/guardian/${session.userId}/`,
+      );
 
-    setGuardianProfile(activeGuardian);
-    navigation.navigate('GuardianHome');
+      const activeGuardian: Guardian = {
+        id: profileResponse.login_id,
+        name: profileResponse.name,
+        phone: profileResponse.phone,
+        address: profileResponse.address,
+        // 백엔드 응답에는 비밀번호가 없으므로(GuardianProfileSerializer에 password 필드
+        // 자체가 없음) 로그인 폼에 입력한 값을 그대로 보관한다 - 기존 목업 동작과 동일.
+        pw,
+      };
+
+      setGuardianProfile(activeGuardian);
+      navigation.navigate('GuardianHome');
+    } catch (err) {
+      setError(getApiErrorMessage(err, '로그인에 실패했습니다. 잠시 후 다시 시도해주세요.'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSignUp = () => {
@@ -126,7 +156,11 @@ export default function GuardianLoginScreen() {
       <View style={styles.actions}>
         <Pressable
           onPress={handleLogin}
-          style={({ pressed }) => [pressed && styles.pressedScale]}
+          disabled={loading}
+          style={({ pressed }) => [
+            pressed && styles.pressedScale,
+            loading && styles.primaryButtonDisabled,
+          ]}
         >
           <LinearGradient
             colors={[colors.primary, colors.primaryLight]}
@@ -134,7 +168,7 @@ export default function GuardianLoginScreen() {
             end={{ x: 1, y: 0 }}
             style={styles.primaryButton}
           >
-            <Text style={styles.primaryButtonText}>로그인</Text>
+            <Text style={styles.primaryButtonText}>{loading ? '로그인 중...' : '로그인'}</Text>
           </LinearGradient>
         </Pressable>
 
@@ -275,6 +309,9 @@ const styles = StyleSheet.create({
     fontSize: guardianFontSizes.button,
     fontWeight: fontWeights.bold,
     color: colors.white,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.6,
   },
   secondaryButton: {
     minHeight: GUARDIAN_MIN_TOUCH_TARGET,
