@@ -1,16 +1,17 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import ExerciseMission, ExerciseSession, Guardian, Senior
+from .models import Exercise, ExerciseMission, ExerciseSession, Guardian, Senior
 from .permissions import IsGuardianSelf, IsSeniorSelf
 from .serializers import (
     ExerciseMissionCreateSerializer,
     ExerciseMissionSerializer,
     ExerciseMissionStatusUpdateSerializer,
+    ExerciseSerializer,
     ExerciseSessionCompleteSerializer,
     ExerciseSessionSerializer,
     ExerciseSessionStartSerializer,
@@ -127,6 +128,36 @@ class GuardianDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = (IsGuardianSelf,)
     lookup_field = 'pk'
     lookup_url_kwarg = 'guardian_id'
+
+
+class ExerciseListView(generics.ListAPIView):
+    """
+    운동 콘텐츠 마스터 목록 조회. 개인정보나 소유권과 무관한 공용 데이터라
+    IsOwnerSelf류 검증은 필요 없다. 로그인 전 미리보기 화면 계획이 없어
+    (frontend/AGENTS.md 기준 ExerciseSelect는 로그인 이후 SeniorHome
+    아래에서만 진입) AllowAny로 열어둘 이유가 약하다고 판단해
+    IsAuthenticated로 좁혔다 - 시니어/보호자 어느 역할이든 로그인만
+    했으면 조회 가능하다(역할별로 막을 이유가 없는 공용 마스터 데이터).
+
+    목록/상세를 별도 시리얼라이저로 나누지 않고 ExerciseSerializer를
+    그대로 재사용한다. reference_angles는 관절 각도 몇 개짜리 작은 JSON일
+    뿐 이미지·영상 같은 무거운 데이터가 아니고, 운동 콘텐츠 자체도 소수인
+    마스터 테이블이라 목록에서 뺐다가 상세에서 다시 채우는 이원화가 실익
+    없는 과최적화라고 판단했다. (ExerciseMinimalSerializer는 이 엔드포인트
+    가 아니라 ExerciseMission에 중첩 표시할 때 쓰는 별도 목적의 축약형
+    이라 여기서는 재사용하지 않는다.)
+    """
+    queryset = Exercise.objects.all().order_by('exercise_id')
+    serializer_class = ExerciseSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class ExerciseDetailView(generics.RetrieveAPIView):
+    queryset = Exercise.objects.all()
+    serializer_class = ExerciseSerializer
+    permission_classes = (IsAuthenticated,)
+    lookup_field = 'pk'
+    lookup_url_kwarg = 'exercise_id'
 
 
 class ExerciseMissionListCreateView(generics.ListCreateAPIView):

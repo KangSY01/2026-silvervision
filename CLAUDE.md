@@ -78,3 +78,6 @@ npx tsc --noEmit        # strict TypeScript 타입 체크 (별도 lint/test npm 
 - 커밋: Conventional Commits, scope에 `frontend`/`backend` 명시 권장 (예: `feat(backend): ...`).
 - 프론트엔드/백엔드가 섞인 PR은 가능하면 분리한다. API 스펙 변경처럼 분리 불가능한 경우 PR 설명에 `Breaking: API 변경`을 명시하고 양쪽 담당자를 리뷰어로 지정한다.
 - 백엔드 보안 필수 규칙(비밀번호 해시 노출 금지, `.env` 하드코딩 금지, IDOR 방지, `camera_access_grant.expires_at` 체크, JWT role 클레임 검증, raw SQL 파라미터 바인딩)은 [backend/claude-security-guidance.md](backend/claude-security-guidance.md)를 인증/권한 코드 작성 전 반드시 확인한다.
+
+## 커뮤니케이션 규칙
+- 작업 완료 보고, 판단 근거 설명 등 모든 응답은 한국어로 작성한다.

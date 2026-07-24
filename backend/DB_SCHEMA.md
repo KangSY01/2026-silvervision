@@ -215,7 +215,7 @@
 - `/auth/senior/register/`, `/auth/senior/login/` → `senior`
 - `/auth/guardian/register/`, `/auth/guardian/login/` → `guardian`
 - `/senior/{id}/`, `/guardian/{id}/` (조회/수정) → `senior`, `guardian`
-- `/exercises/`, `/exercises/{id}/` → `exercise`
+- `/exercises/`, `/exercises/{id}/` → `exercise` (2026-07-24: 문서에는 "구현 완료"로 표기돼 있었으나 실제 `views.py`/`urls.py`에는 라우팅·뷰가 없던 상태였고, 이번에 실제로 구현해 문서와 코드를 일치시킴)
 
 **구현 예정 (중간보고서 시점, 이번 재개발에서 우선순위 대상)**
 - `/senior/{id}/ranking/` → `ranking_snapshot`
