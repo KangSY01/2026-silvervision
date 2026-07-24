@@ -45,3 +45,17 @@ class IsGuardianSelf(IsOwnerSelf):
     model = Guardian
     url_kwarg = 'guardian_id'
     user_pk_attr = 'guardian_id'
+
+
+class IsSeniorOrGuardian(BasePermission):
+    """
+    응급 이벤트/카메라 접근 권한 엔드포인트는 URL에 senior_id가 없고
+    event_id만 있어 IsOwnerSelf 계열(URL 파라미터 대조)을 쓸 수 없다.
+    이 클래스는 "로그인 주체가 Senior 또는 Guardian 중 하나인가"만
+    확인해 미인증 요청이 401로 처리되게 하고, "이 이벤트가 본인 소속
+    또는 매핑된 보호자 소속인가"는 각 뷰의 get_queryset()이
+    senior 본인/GuardianSeniorMap 기준으로 필터링해서 처리한다
+    (V6·V7과 동일하게 queryset에 없으면 404).
+    """
+    def has_permission(self, request, view):
+        return isinstance(request.user, (Senior, Guardian))

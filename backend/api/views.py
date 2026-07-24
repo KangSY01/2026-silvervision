@@ -1,13 +1,29 @@
+from django.http import Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Exercise, ExerciseMission, ExerciseSession, Guardian, Senior
-from .permissions import IsGuardianSelf, IsSeniorSelf
+from .models import (
+    CameraAccessGrant,
+    EmergencyEvent,
+    EmergencyNotification,
+    Exercise,
+    ExerciseMission,
+    ExerciseSession,
+    Guardian,
+    GuardianSeniorMap,
+    Senior,
+)
+from .permissions import IsGuardianSelf, IsSenior, IsSeniorOrGuardian, IsSeniorSelf
 from .serializers import (
+    CameraAccessGrantSerializer,
+    EmergencyEventSerializer,
+    EmergencyEventStatusUpdateSerializer,
+    EmergencyNotificationSerializer,
     ExerciseMissionCreateSerializer,
     ExerciseMissionSerializer,
     ExerciseMissionStatusUpdateSerializer,
@@ -22,6 +38,7 @@ from .serializers import (
     SeniorLoginSerializer,
     SeniorProfileSerializer,
     SeniorRegisterSerializer,
+    is_valid_emergency_transition,
 )
 
 INVALID_CREDENTIALS_MESSAGE = '아이디 또는 비밀번호가 올바르지 않습니다.'
@@ -289,3 +306,159 @@ class SessionFeedbackCreateView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+def _visible_emergency_events(user):
+    """
+    시니어 본인 소유 이벤트, 또는 guardian_senior_map으로 그 시니어와
+    연결된 보호자에게 보이는 이벤트만 필터링한다. 이벤트 PATCH/notify/
+    camera-grant 전부 이 쿼리셋으로 조회해 다른 시니어 소속 event_id
+    접근 시 404가 되도록 통일한다(claude-security-guidance.md의 IDOR
+    방지 규칙, V6·V7과 동일한 기준).
+    """
+    if isinstance(user, Senior):
+        return EmergencyEvent.objects.filter(senior_id=user.senior_id)
+    if isinstance(user, Guardian):
+        senior_ids = GuardianSeniorMap.objects.filter(
+            guardian=user
+        ).values_list('senior_id', flat=True)
+        return EmergencyEvent.objects.filter(senior_id__in=senior_ids)
+    return EmergencyEvent.objects.none()
+
+
+class EmergencyEventCreateView(generics.CreateAPIView):
+    """
+    AGENTS.md 기준 이벤트는 시니어 기기(비전 모델/센서)가 감지해서
+    보내는 것이라 시니어 본인만 생성 가능하다. URL에 senior_id가 없어
+    "본인 여부 대조"가 필요 없으므로(비교할 URL 값 자체가 없음) 신규
+    권한 클래스 없이 기존 IsSenior만으로 충분하다.
+    """
+    serializer_class = EmergencyEventSerializer
+    permission_classes = (IsSenior,)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(senior=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class EmergencyEventStatusUpdateView(generics.UpdateAPIView):
+    """
+    PATCH 전용 - status만 변경. 시니어 본인 또는 연동된 보호자 모두
+    허용(claude-security-guidance.md). 허용되지 않는 상태 전이는
+    EmergencyEventStatusUpdateSerializer.validate_status가 400으로
+    거부한다.
+    """
+    serializer_class = EmergencyEventStatusUpdateSerializer
+    permission_classes = (IsSeniorOrGuardian,)
+    lookup_field = 'pk'
+    lookup_url_kwarg = 'event_id'
+    http_method_names = ['patch']
+
+    def get_queryset(self):
+        return _visible_emergency_events(self.request.user)
+
+
+class EmergencyNotifyView(APIView):
+    """
+    body의 guardian은 선택 - 생략하면 guardian_senior_map에 매핑된
+    보호자 전원에게 각각 EmergencyNotification을 생성한다(실제
+    응급상황에서는 연결된 보호자 모두에게 알리는 게 기본이어야 하므로).
+    guardian을 지정하면 해당 시니어와 매핑된 보호자인지 검증하고,
+    매핑 안 됐으면 400. 실제 FCM 발송/외부 연동은 범위 밖 - row 저장
+    까지만 한다.
+
+    성공 시 status를 notified로 전환한다(이미 notified면 멱등하게
+    통과). first_check를 거치지 않은 상태(detected)이거나 이미
+    종결된 상태(resolved/false_alarm)에서는 상태 전이 규칙 위반이라
+    400으로 거부한다 - first_check로 먼저 PATCH한 뒤 notify를
+    호출해야 한다.
+    """
+    permission_classes = (IsSeniorOrGuardian,)
+
+    def post(self, request, event_id):
+        event = get_object_or_404(
+            _visible_emergency_events(request.user), pk=event_id,
+        )
+
+        target_status = EmergencyEvent.Status.NOTIFIED
+        if event.status != target_status:
+            if not is_valid_emergency_transition(event.status, target_status):
+                return Response(
+                    {
+                        'detail': (
+                            f'{event.status} 상태에서는 알림을 보낼 수 '
+                            '없습니다. 먼저 first_check로 전환하세요.'
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            event.status = target_status
+            event.save(update_fields=['status'])
+
+        guardian_id = request.data.get('guardian')
+        if guardian_id is not None:
+            is_mapped = GuardianSeniorMap.objects.filter(
+                senior_id=event.senior_id, guardian_id=guardian_id,
+            ).exists()
+            if not is_mapped:
+                return Response(
+                    {'detail': '해당 시니어와 연동되지 않은 보호자입니다.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            guardian_ids = [guardian_id]
+        else:
+            guardian_ids = list(
+                GuardianSeniorMap.objects.filter(
+                    senior_id=event.senior_id,
+                ).values_list('guardian_id', flat=True)
+            )
+
+        notifications = [
+            EmergencyNotification.objects.create(event=event, guardian_id=gid)
+            for gid in guardian_ids
+        ]
+        output = EmergencyNotificationSerializer(notifications, many=True)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
+class CameraAccessGrantView(APIView):
+    """
+    POST - 카메라 접근 권한 부여. event는 URL에서, expires_at은 body에서
+    받는다(CameraAccessGrantSerializer.validate_expires_at이 미래
+    시각인지 검증).
+    DELETE - row를 삭제하지 않고 expires_at을 현재 시각으로 당겨
+    즉시 만료 처리한다. 응급 상황의 카메라 접근 이력은 감사 로그로
+    남아야 한다고 판단해 삭제 대신 만료를 택했다. 해당 이벤트에 걸린
+    활성 권한이 없으면 404.
+    """
+    permission_classes = (IsSeniorOrGuardian,)
+
+    def post(self, request, event_id):
+        event = get_object_or_404(
+            _visible_emergency_events(request.user), pk=event_id,
+        )
+        serializer = CameraAccessGrantSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        grant = serializer.save(event=event)
+        return Response(
+            CameraAccessGrantSerializer(grant).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def delete(self, request, event_id):
+        event = get_object_or_404(
+            _visible_emergency_events(request.user), pk=event_id,
+        )
+        now = timezone.now()
+        active_grants = list(
+            CameraAccessGrant.objects.filter(event=event, expires_at__gt=now)
+        )
+        if not active_grants:
+            raise Http404
+        for grant in active_grants:
+            grant.expires_at = now
+        CameraAccessGrant.objects.bulk_update(active_grants, ['expires_at'])
+        output = CameraAccessGrantSerializer(active_grants, many=True)
+        return Response(output.data, status=status.HTTP_200_OK)
