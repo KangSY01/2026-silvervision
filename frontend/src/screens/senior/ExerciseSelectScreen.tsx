@@ -1,6 +1,8 @@
 import { useNavigation } from '@react-navigation/native';
-import { Mic, Play, Sparkles } from 'lucide-react-native';
+import { Info, Mic, Play, Sparkles } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { apiClient, ExerciseResponse, getApiErrorMessage } from '../../api/client';
 import TabScreenLayout from '../../components/TabScreenLayout';
 import {
   colors,
@@ -12,44 +14,69 @@ import {
 } from '../../theme/theme';
 import { Workout } from '../../types';
 
-const WORKOUTS: Workout[] = [
-  {
-    id: 'stretch',
-    name: '관절 스트레칭',
-    difficulty: '쉬움',
-    duration: '3분',
-    iconName: '🧘',
-    description: '앉은 자세에서 목, 어깨, 손목을 천천히 돌려 굳은 관절을 부드럽게 풀어줍니다.',
-  },
-  {
-    id: 'upper',
-    name: '어깨 상체 운동',
-    difficulty: '보통',
-    duration: '5분',
-    iconName: '💪',
-    description: '양팔을 천천히 들어올리며 어깨와 팔 근육을 골고루 사용해 상체 힘을 길러줍니다.',
-  },
-  {
-    id: 'knee',
-    name: '무릎 관절 강화 운동',
-    difficulty: '쉬움',
-    duration: '4분',
-    iconName: '🦵',
-    description:
-      '안전한 의자에 바르게 앉아 다리를 가볍게 쭉 펴주며 무릎 연골 주변 허벅지 근육을 채웁니다.',
-  },
-  {
-    id: 'balance',
-    name: '낙상 예방 균형 운동',
-    difficulty: '보통',
-    duration: '5분',
-    iconName: '⚖️',
-    description: '한 발로 가볍게 서는 동작을 반복하며 균형 감각을 키워 낙상을 예방합니다.',
-  },
-];
+// ExerciseResponse.difficulty(백엔드 enum) -> Workout.difficulty(화면 표시용 한글 라벨).
+// mobility_level 매핑과 같은 패턴 - Record 타입이라 백엔드 enum 값이 늘어나면
+// 컴파일 타임에 누락이 드러난다.
+const DIFFICULTY_LABELS: Record<ExerciseResponse['difficulty'], Workout['difficulty']> = {
+  easy: '쉬움',
+  medium: '보통',
+  hard: '어려움',
+};
+
+const DIFFICULTY_BADGE_COLORS: Record<Workout['difficulty'], { background: string; text: string }> = {
+  쉬움: { background: colors.primarySoftBackground, text: colors.primary },
+  보통: { background: colors.amberSoftBackground, text: colors.amberText },
+  어려움: { background: colors.dangerBackground, text: colors.danger },
+};
+
+// 백엔드 Exercise 모델엔 아이콘 필드가 없다. category(자유 텍스트)를 기준으로
+// 화면 표시용 이모지만 로컬에서 유추하고, 목록에 없는 category는 기본 아이콘으로
+// 폴백한다 - 카드가 비어 보이지 않게 하기 위한 순수 프레젠테이션 로직이며
+// Workout 타입 자체에는 저장하지 않는다(타입은 API 응답 형태를 그대로 반영).
+const CATEGORY_ICONS: Record<string, string> = {
+  스트레칭: '🧘',
+  '상체 운동': '💪',
+  '무릎 운동': '🦵',
+  '균형 운동': '⚖️',
+};
+const DEFAULT_CATEGORY_ICON = '🏃';
+
+function getCategoryIcon(category: string): string {
+  return CATEGORY_ICONS[category] ?? DEFAULT_CATEGORY_ICON;
+}
+
+function mapExerciseResponse(exercise: ExerciseResponse): Workout {
+  return {
+    id: exercise.exercise_id,
+    name: exercise.name,
+    category: exercise.category,
+    difficulty: DIFFICULTY_LABELS[exercise.difficulty],
+  };
+}
 
 export default function ExerciseSelectScreen() {
   const navigation = useNavigation();
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const loadExercises = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await apiClient.get<ExerciseResponse[]>('/exercises/');
+      setWorkouts(response.map(mapExerciseResponse));
+    } catch (err) {
+      setError(getApiErrorMessage(err, '운동 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadExercises();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleOpenVoiceAssistant = () => {
     // TODO: 음성 인식 기능 설계 확정 후 연결 (AGENTS.md 5장 참고) — VoiceAssistantModal은 아직 마운트하지 않음
@@ -85,59 +112,71 @@ export default function ExerciseSelectScreen() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.helperGuide}>
-          <Sparkles size={20} color={colors.amberFill} fill={colors.amberFill} />
-          <Text style={styles.helperGuideText}>아래에서 하고 싶은 운동 카드를 눌러주세요!</Text>
-        </View>
-
-        {WORKOUTS.map((workout) => {
-          const isEasy = workout.difficulty === '쉬움';
-          return (
+        {loading ? (
+          <View style={styles.statusBox}>
+            <Text style={styles.statusText}>운동 목록을 불러오는 중...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorBox}>
+            <Info size={20} color={colors.danger} />
+            <Text style={styles.errorText}>{error}</Text>
             <Pressable
-              key={workout.id}
-              onPress={() => handleSelectWorkout(workout)}
-              style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+              onPress={loadExercises}
+              style={({ pressed }) => [styles.retryButton, pressed && styles.pressedOpacity]}
             >
-              <View style={styles.cardTopRow}>
-                <View style={styles.cardLeft}>
-                  <View style={styles.iconBox}>
-                    <Text style={styles.iconText}>{workout.iconName}</Text>
-                  </View>
-                  <View style={styles.cardTitleArea}>
-                    <Text style={styles.cardTitle}>{workout.name}</Text>
-                    <View style={styles.badgeRow}>
-                      <View
-                        style={[
-                          styles.badge,
-                          { backgroundColor: isEasy ? colors.primarySoftBackground : colors.amberSoftBackground },
-                        ]}
-                      >
-                        <Text
-                          style={[styles.badgeText, { color: isEasy ? colors.primary : colors.amberText }]}
-                        >
-                          난이도: {workout.difficulty}
-                        </Text>
+              <Text style={styles.retryButtonText}>다시 시도</Text>
+            </Pressable>
+          </View>
+        ) : workouts.length === 0 ? (
+          <View style={styles.statusBox}>
+            <Text style={styles.statusText}>등록된 운동이 아직 없습니다.</Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.helperGuide}>
+              <Sparkles size={20} color={colors.amberFill} fill={colors.amberFill} />
+              <Text style={styles.helperGuideText}>아래에서 하고 싶은 운동 카드를 눌러주세요!</Text>
+            </View>
+
+            {workouts.map((workout) => {
+              const badgeColor = DIFFICULTY_BADGE_COLORS[workout.difficulty];
+              return (
+                <Pressable
+                  key={workout.id}
+                  onPress={() => handleSelectWorkout(workout)}
+                  style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+                >
+                  <View style={styles.cardTopRow}>
+                    <View style={styles.cardLeft}>
+                      <View style={styles.iconBox}>
+                        <Text style={styles.iconText}>{getCategoryIcon(workout.category)}</Text>
                       </View>
-                      <View style={[styles.badge, { backgroundColor: colors.grayBadgeBackground }]}>
-                        <Text style={[styles.badgeText, { color: colors.disabledText }]}>
-                          시간: {workout.duration}
-                        </Text>
+                      <View style={styles.cardTitleArea}>
+                        <Text style={styles.cardTitle}>{workout.name}</Text>
+                        <View style={styles.badgeRow}>
+                          <View style={[styles.badge, { backgroundColor: badgeColor.background }]}>
+                            <Text style={[styles.badgeText, { color: badgeColor.text }]}>
+                              난이도: {workout.difficulty}
+                            </Text>
+                          </View>
+                          <View style={[styles.badge, { backgroundColor: colors.grayBadgeBackground }]}>
+                            <Text style={[styles.badgeText, { color: colors.disabledText }]}>
+                              {workout.category}
+                            </Text>
+                          </View>
+                        </View>
                       </View>
                     </View>
+
+                    <View style={styles.playButton}>
+                      <Play size={20} color={colors.primary} fill={colors.primary} />
+                    </View>
                   </View>
-                </View>
-
-                <View style={styles.playButton}>
-                  <Play size={20} color={colors.primary} fill={colors.primary} />
-                </View>
-              </View>
-
-              <View style={styles.descriptionBox}>
-                <Text style={styles.descriptionText}>{workout.description}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
+                </Pressable>
+              );
+            })}
+          </>
+        )}
       </ScrollView>
     </TabScreenLayout>
   );
@@ -194,6 +233,45 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.md,
   },
+  statusBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  statusText: {
+    fontSize: fontSizes.body,
+    fontWeight: fontWeights.medium,
+    color: colors.textSecondary,
+  },
+  errorBox: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.dangerBackground,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+  },
+  errorText: {
+    textAlign: 'center',
+    fontSize: fontSizes.body,
+    fontWeight: fontWeights.bold,
+    color: colors.danger,
+  },
+  retryButton: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.dangerBorder,
+  },
+  retryButtonText: {
+    fontSize: fontSizes.body,
+    fontWeight: fontWeights.bold,
+    color: colors.danger,
+  },
   helperGuide: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -203,6 +281,7 @@ const styles = StyleSheet.create({
     borderColor: colors.primarySoftBorderStrong,
     borderRadius: radius.lg,
     padding: spacing.md,
+    marginBottom: spacing.md,
   },
   helperGuideText: {
     flex: 1,
@@ -211,13 +290,12 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   card: {
-    minHeight: 140,
     backgroundColor: colors.surface,
     borderRadius: 28,
     borderWidth: 2,
     borderColor: 'transparent',
     padding: spacing.md + spacing.xs,
-    gap: spacing.md,
+    marginBottom: spacing.md,
     shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.03,
@@ -280,20 +358,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  descriptionBox: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    borderRadius: radius.md,
-    padding: spacing.sm + spacing.xs,
-  },
-  descriptionText: {
-    fontSize: fontSizes.caption,
-    fontWeight: fontWeights.medium,
-    color: colors.textSecondary,
-    lineHeight: 26,
-  },
   pressedPrimary: {
     backgroundColor: '#256428',
+  },
+  pressedOpacity: {
+    opacity: 0.6,
   },
 });
