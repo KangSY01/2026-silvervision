@@ -236,7 +236,10 @@ class EmergencyEventSerializer(serializers.ModelSerializer):
     status는 모델 기본값('detected')에 맡기고 입력 필드에서 제외한다.
     클라이언트가 생성 요청에서 임의로 상태를 지정하지 못하게 하기 위함
     이며, 상태 변경은 EmergencyEventStatusUpdateSerializer를 통해서만
-    이뤄진다.
+    이뤄진다. senior도 read-only로 두고 뷰에서 토큰 본인(request.user)
+    으로 강제 주입한다 - URL에 senior_id가 없는 엔드포인트라 body의
+    senior 값을 그대로 신뢰하면 다른 시니어 명의로 이벤트를 만들 수
+    있는 IDOR이 된다.
     """
     class Meta:
         model = EmergencyEvent
@@ -244,35 +247,84 @@ class EmergencyEventSerializer(serializers.ModelSerializer):
             'event_id', 'senior', 'event_type', 'detection_source',
             'status', 'created_at',
         )
-        read_only_fields = ('event_id', 'status', 'created_at')
+        read_only_fields = ('event_id', 'senior', 'status', 'created_at')
+
+
+# 상태 전이 규칙 (확정): detected -> first_check -> (false_alarm | notified)
+# -> resolved. 다이어그램에 없는 전이(예: detected에서 바로 resolved,
+# resolved에서 다시 detected로 되돌리는 것 등)는 전부 허용하지 않는다.
+# 같은 상태로의 재요청(멱등 재시도)은 전이로 취급하지 않고 허용한다.
+EMERGENCY_EVENT_TRANSITIONS = {
+    EmergencyEvent.Status.DETECTED: {EmergencyEvent.Status.FIRST_CHECK},
+    EmergencyEvent.Status.FIRST_CHECK: {
+        EmergencyEvent.Status.FALSE_ALARM, EmergencyEvent.Status.NOTIFIED,
+    },
+    EmergencyEvent.Status.FALSE_ALARM: {EmergencyEvent.Status.RESOLVED},
+    EmergencyEvent.Status.NOTIFIED: {EmergencyEvent.Status.RESOLVED},
+    EmergencyEvent.Status.RESOLVED: set(),
+}
+
+
+def is_valid_emergency_transition(current_status, new_status):
+    if current_status == new_status:
+        return True
+    return new_status in EMERGENCY_EVENT_TRANSITIONS.get(current_status, set())
 
 
 class EmergencyEventStatusUpdateSerializer(serializers.ModelSerializer):
     """
     담당자/보호자 측 대응 흐름에서 status만 변경하기 위한 PATCH 전용
-    시리얼라이저 (감지됨 -> 1차확인/오보/알림전송 -> 종료). 어떤 상태
-    전이가 허용되는지(예: 종료된 이벤트를 다시 감지됨으로 되돌릴 수
-    있는지)를 검증하는 전이 로직은 넣지 않았다 - 이는 AI 판별 로직은
-    아니지만 별도의 비즈니스 규칙 확인이 필요해 범위 밖으로 뒀다.
+    시리얼라이저 (감지됨 -> 1차확인 -> (오보|알림전송) -> 종료). 위
+    EMERGENCY_EVENT_TRANSITIONS 표에 없는 전이는 400으로 거부한다.
+
+    다만 EMERGENCY_EVENT_TRANSITIONS 표에는 first_check -> notified가
+    허용 전이로 올라 있지만(EmergencyNotifyView가 is_valid_emergency_transition
+    을 직접 호출할 때 재사용해야 하므로 표 자체는 건드리지 않는다), notified
+    로의 전이는 실제 알림 발송(EmergencyNotification 생성)을 동반해야
+    의미가 있다. 이 PATCH 엔드포인트로 직접 notified를 찍으면 상태만
+    바뀌고 알림 이력 없이 "이미 알림을 보낸 것"처럼 보이는 상태가 될 수
+    있어, 목표 상태가 notified인 경우는 표 조회 이전에 무조건 거부하고
+    /notify/ 엔드포인트로만 도달하도록 막는다.
     """
     class Meta:
         model = EmergencyEvent
         fields = ('event_id', 'status')
         read_only_fields = ('event_id',)
 
+    def validate_status(self, value):
+        if value == EmergencyEvent.Status.NOTIFIED:
+            raise serializers.ValidationError(
+                'notified 상태로의 전이는 /notify/ 엔드포인트를 통해서만 '
+                '가능합니다.'
+            )
+        current = self.instance.status if self.instance else None
+        if current is not None and not is_valid_emergency_transition(
+            current, value
+        ):
+            raise serializers.ValidationError(
+                f'{current} 상태에서 {value}(으)로 바꿀 수 없습니다.'
+            )
+        return value
+
 
 class EmergencyNotificationSerializer(serializers.ModelSerializer):
+    """
+    event/guardian 모두 read-only. event는 URL의 event_id에서, guardian은
+    guardian_senior_map 조회(또는 검증된 body 값)에서 뷰가 채운다 -
+    매핑되지 않은 보호자에게 알림이 가는 걸 시리얼라이저 레벨의 입력을
+    신뢰하지 않는 방식으로 막는다.
+    """
     class Meta:
         model = EmergencyNotification
         fields = ('notification_id', 'event', 'guardian', 'channel', 'sent_at')
-        read_only_fields = ('notification_id', 'sent_at')
+        read_only_fields = ('notification_id', 'event', 'guardian', 'sent_at')
 
 
 class CameraAccessGrantSerializer(serializers.ModelSerializer):
     class Meta:
         model = CameraAccessGrant
         fields = ('grant_id', 'event', 'granted_at', 'expires_at')
-        read_only_fields = ('grant_id', 'granted_at')
+        read_only_fields = ('grant_id', 'event', 'granted_at')
 
     def validate_expires_at(self, value):
         # granted_at은 auto_now_add라 저장 시점의 현재 시각으로 채워지므로,

@@ -209,21 +209,21 @@
 
 ## 참고 — API 연동 관련 메모
 
-중간보고서 5.2절 기준으로, 아래 엔드포인트가 이 스키마와 직접 연결된다.
+중간보고서 5.2절 기준으로, 아래 엔드포인트가 이 스키마와 직접 연결된다. (2026-07-17 기준 실제 `api/urls.py` 라우팅과 대조해 갱신)
 
-**구현 완료 (중간보고서 시점)**
+**구현 완료**
 - `/auth/senior/register/`, `/auth/senior/login/` → `senior`
 - `/auth/guardian/register/`, `/auth/guardian/login/` → `guardian`
 - `/senior/{id}/`, `/guardian/{id}/` (조회/수정) → `senior`, `guardian`
+- `/senior/{id}/missions/`, `.../missions/{mission_id}/` → `exercise_mission`
+- `/senior/{id}/sessions/`, `.../sessions/{session_id}/`, `.../feedback/` → `exercise_session`, `pose_feedback`
+- `/emergency/`, `/emergency/{event_id}/`, `.../notify/`, `.../camera-grant/` (POST/DELETE) → `emergency_event`, `emergency_notification`, `camera_access_grant`
 - `/exercises/`, `/exercises/{id}/` → `exercise` (2026-07-24: 문서에는 "구현 완료"로 표기돼 있었으나 실제 `views.py`/`urls.py`에는 라우팅·뷰가 없던 상태였고, 이번에 실제로 구현해 문서와 코드를 일치시킴)
 
-**구현 예정 (중간보고서 시점, 이번 재개발에서 우선순위 대상)**
+**구현 예정**
 - `/senior/{id}/ranking/` → `ranking_snapshot`
 - `/guardian/{id}/seniors/` (조회/등록/해제) → `guardian_senior_map`
-- `/senior/{id}/missions/` → `exercise_mission`
-- `/senior/{id}/sessions/`, `.../feedback/` → `exercise_session`, `pose_feedback`
 - `/senior/{id}/ability-log/` → `physical_ability_log`
-- `/emergency/`, `/emergency/{event_id}/`, `.../notify/`, `.../camera-grant/` → `emergency_event`, `emergency_notification`, `camera_access_grant`
 - `/senior/{id}/activity-log/` → `activity_log`
 
 이번 재개발은 이 문서(v2 스키마)를 기준으로 처음부터 다시 구현하며, 위 API 목록은 우선순위 참고용이지 기존 코드가 남아있다는 의미는 아니다 (완전히 새로 작성).

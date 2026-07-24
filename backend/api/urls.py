@@ -68,6 +68,25 @@ urlpatterns = [
     ),
 
     # 응급 관련 URL
+    path(
+        'emergency/', views.EmergencyEventCreateView.as_view(),
+        name='emergency-event-create',
+    ),
+    path(
+        'emergency/<int:event_id>/',
+        views.EmergencyEventStatusUpdateView.as_view(),
+        name='emergency-event-status-update',
+    ),
+    path(
+        'emergency/<int:event_id>/notify/',
+        views.EmergencyNotifyView.as_view(),
+        name='emergency-event-notify',
+    ),
+    path(
+        'emergency/<int:event_id>/camera-grant/',
+        views.CameraAccessGrantView.as_view(),
+        name='emergency-event-camera-grant',
+    ),
 
     # 게임화 관련 URL
 ]
