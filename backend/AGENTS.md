@@ -8,7 +8,7 @@
 
 - Django 6.0.7 (Python 3.12, venv는 `backend/venv/`)
 - MySQL 8.x + `mysqlclient` — `config/settings.py`의 `DATABASES`가 `.env`(`DB_NAME`/`DB_USER`/`DB_PASSWORD`/`DB_HOST`/`DB_PORT`)를 읽는다
-- `djangorestframework` + `djangorestframework_simplejwt` — JWT 인증 (아래 3장 참고)
+- `djangorestframework` + `djangorestframework_simplejwt` — JWT 인증 (커스텀 인증/권한 클래스는 5장 참고)
 - `django-cors-headers` — 개발 단계 CORS 전체 허용(`CORS_ALLOW_ALL_ORIGINS = True`)
 - `python-dotenv` — `SECRET_KEY` 등 비밀값을 `.env`에서 로드 (`.env`는 git에 커밋하지 않음, `.env.example` 참고)
 
@@ -31,10 +31,58 @@
 
 ## 5. 현재 구현 상태
 
-- **모델**: `DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0005` MySQL에 적용 및 컬럼/FK 검증 완료.
-- **인증 설계**: `Senior`/`Guardian`은 두 개의 독립된 로그인 주체라 Django `AUTH_USER_MODEL`(하나만 허용)로 통합하지 않고, 각각 일반 모델 + `set_password`/`check_password`(해싱)로 처리한다. JWT는 로그인 뷰에서 직접 발급하며 `role: senior|guardian` 커스텀 클레임으로 두 주체를 구분한다 (아직 커스텀 `JWTAuthentication` 서브클래스는 미구현).
-- **시리얼라이저**: `api/serializers.py`에 계정(Senior/Guardian 가입·프로필·로그인)과 운동/기록 영역(Exercise, ExerciseMission, ExerciseSession, PoseFeedback, PhysicalAbilityLog) 시리얼라이저 작성 완료.
-- **미구현**: `api/views.py`, URL 라우팅(`config/urls.py`에 `api/` 아직 미연결), 응급/게임화 영역 시리얼라이저, 커스텀 JWT 인증 클래스.
+실제 `api/urls.py`(전부 `/api/v1/` 하위) 라우팅 기준이다. 문서와 코드가 어긋나면 코드가 기준이며, 이 절을 갱신할 것.
+
+### 모델 / 마이그레이션
+
+`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0006` MySQL 적용 및 컬럼/FK 검증 완료.
+
+### 인증 / 권한 (구현 완료)
+
+- `Senior`/`Guardian`은 독립된 두 로그인 주체라 `AUTH_USER_MODEL`로 통합하지 않고 각각 일반 모델 + `set_password`/`check_password`(Django hasher)로 처리한다. JWT는 로그인 뷰(`views._issue_tokens`)에서 직접 발급하며 `role: senior|guardian` + `user_id` 커스텀 클레임을 담는다.
+- `api/authentication.py`의 **`RoleBasedJWTAuthentication`**(`JWTAuthentication` 서브클래스)가 `settings.REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES']`에 등록돼 있고, 토큰의 `role` 클레임으로 `Senior`/`Guardian` 중 조회할 모델을 정해 `request.user`에 담는다.
+- `api/permissions.py`: **`IsSenior`/`IsGuardian`**(타입 확인), **`IsOwnerSelf`**(URL `{id}` == 토큰 본인, IDOR 방지) + 서브클래스 **`IsSeniorSelf`/`IsGuardianSelf`**, **`IsSeniorOrGuardian`**(로그인 여부만). `IsOwnerSelf` 계열은 프로필·미션·세션·보호자매핑 뷰에서 재사용 중이다. `senior_id`가 URL에 없는 응급 엔드포인트는 `IsSeniorOrGuardian` + 각 뷰 `get_queryset()`의 `_visible_emergency_events`(본인 소유 또는 `GuardianSeniorMap` 연결 보호자) 필터로 권한을 처리한다.
+
+### 엔드포인트 (섹션별 구현 현황)
+
+| 섹션 | Method | 경로 | 권한 |
+|---|---|---|---|
+| **인증** | POST | `auth/senior/register/`, `auth/senior/login/` | AllowAny |
+| | POST | `auth/guardian/register/`, `auth/guardian/login/` | AllowAny |
+| **계정** | GET·PUT·PATCH | `senior/{senior_id}/` | `IsSeniorSelf` |
+| | GET·PUT·PATCH | `guardian/{guardian_id}/` | `IsGuardianSelf` |
+| | GET·POST | `guardian/{guardian_id}/seniors/` — 매핑 목록 / 등록 | `IsGuardianSelf` |
+| | DELETE | `guardian/{guardian_id}/seniors/{senior_id}/` — 연결 해제 | `IsGuardianSelf` |
+| **운동** | GET | `exercises/`, `exercises/{exercise_id}/` | IsAuthenticated |
+| | GET·POST | `senior/{senior_id}/missions/` | `IsSeniorSelf` |
+| | PATCH | `senior/{senior_id}/missions/{mission_id}/` — status만 | `IsSeniorSelf` |
+| **기록** | GET·POST | `senior/{senior_id}/sessions/` — 목록 / 세션 시작 | `IsSeniorSelf` |
+| | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` — GET은 `pose_feedback` nested / PATCH는 `completion_rate`·`accuracy_avg` | `IsSeniorSelf` |
+| | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` — bulk 저장 | `IsSeniorSelf` |
+| **응급** | GET·POST | `emergency/` — GET은 `IsSeniorOrGuardian` + `_visible_emergency_events`, POST는 `IsSenior`(시니어 본인만 생성) | (method별) |
+| | GET·PATCH | `emergency/{event_id}/` — GET은 `emergency_notification`·`camera_access_grant` nested / PATCH는 status 전이(`notified` 제외) | `IsSeniorOrGuardian` + `_visible_emergency_events` |
+| | POST | `emergency/{event_id}/notify/` — 알림 row 생성 (FCM 실발송은 범위 밖) | `IsSeniorOrGuardian` |
+| | POST·DELETE | `emergency/{event_id}/camera-grant/` — DELETE는 즉시 만료 처리 | `IsSeniorOrGuardian` |
+| **게임화** | — | (엔드포인트 없음) | — |
+
+- 매핑 등록(POST `.../seniors/`)은 `registered_via` + (`login_id` | `barcode_code`)를 받아 **서버가 senior를 조회**한다. 중복 등록 **409**, 미존재 식별자 **404**. 판단 근거는 `DB_SCHEMA.md` "API 연동 관련 메모" 참고.
+
+### 시리얼라이저
+
+`api/serializers.py`에 13개 테이블 전 영역 작성 완료. 액션별로 분리돼 있다(예: `ExerciseMissionSerializer`/`...CreateSerializer`/`...StatusUpdateSerializer`, `ExerciseSession` start/complete/detail, `EmergencyEvent` 생성/status-update/detail). `PhysicalAbilityLogSerializer`·`ActivityLogSerializer`·`RankingSnapshotSerializer`는 작성돼 있으나 대응 뷰·URL이 아직 없다.
+
+### 미구현 (구현 예정)
+
+| 섹션 | 항목 |
+|---|---|
+| 인증 | 토큰 refresh(재발급), 로그아웃, 비밀번호 변경/재설정. 매핑 등록 전 시니어 검색 API 없음 |
+| 기록 | `senior/{id}/ability-log/` → `physical_ability_log` (시리얼라이저만 존재) |
+| 응급 | `activity_log`(무활동 감지 로그) 저장/조회 API — 모델·시리얼라이저만 존재 |
+| 게임화 | **섹션 전체 미구현.** `senior/{id}/ranking/` → `ranking_snapshot` 조회, `Senior.fruit_count` 증감(운동 보상) 로직 전무. 모델·시리얼라이저·admin만 존재 |
+
+### 테스트
+
+`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET 엔드포인트 테스트 25건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 
