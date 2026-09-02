@@ -19,6 +19,7 @@ from .models import (
     GuardianSeniorMap,
     Senior,
 )
+from .gamification import latest_ranking, recalculate_rankings, recompute_fruit_count
 from .permissions import IsGuardianSelf, IsSenior, IsSeniorOrGuardian, IsSeniorSelf
 from .serializers import (
     AlreadyRegistered,
@@ -41,6 +42,7 @@ from .serializers import (
     GuardianSeniorMapCreateSerializer,
     GuardianSeniorMapSerializer,
     PoseFeedbackSerializer,
+    RankingSnapshotSerializer,
     SeniorLoginSerializer,
     SeniorProfileSerializer,
     SeniorRegisterSerializer,
@@ -355,6 +357,18 @@ class ExerciseSessionDetailView(generics.RetrieveUpdateAPIView):
             return ExerciseSessionCompleteSerializer
         return ExerciseSessionDetailSerializer
 
+    def perform_update(self, serializer):
+        session = serializer.save()
+        # completion_rate가 채워진 시점 = 세션 "완료 처리" 시점. 이때만
+        # 게임화 보상/순위를 갱신한다. recompute_fruit_count·recalculate_rankings
+        # 둘 다 멱등(전량 재계산)이라 같은 세션을 다시 PATCH해도 중복
+        # 지급/오집계가 없다. 순위 산정 대상 시니어 수가 적은 규모라 매
+        # 완료마다 그 날짜분을 전량 재계산하는 비용이 허용 가능하다고 판단했다
+        # (부담이 커지면 manage.py recalculate_rankings로 배치 전환).
+        if session.completion_rate is not None:
+            recompute_fruit_count(session.senior)
+            recalculate_rankings()
+
 
 class SessionFeedbackCreateView(generics.CreateAPIView):
     """
@@ -566,3 +580,30 @@ class CameraAccessGrantView(APIView):
         CameraAccessGrant.objects.bulk_update(active_grants, ['expires_at'])
         output = CameraAccessGrantSerializer(active_grants, many=True)
         return Response(output.data, status=status.HTTP_200_OK)
+
+
+class SeniorRankingView(APIView):
+    """
+    GET /senior/{senior_id}/ranking/ - 이 시니어의 최신 전국/지역 순위.
+
+    응답은 scope별 최신 스냅샷을 나란히 담는다(전국/지역을 한 응답에 어떻게
+    묶을지는 RankingSnapshotSerializer가 아니라 여기 views.py의 몫):
+
+        {"national": {<snapshot>} | null, "regional": {<snapshot>} | null}
+
+    스냅샷은 별도 스케줄러가 아니라 세션 완료(ExerciseSessionDetailView PATCH)
+    시점에 gamification.recalculate_rankings()가 그 날짜분을 전량 upsert한다.
+    아직 완료한 세션이 한 건도 없는 신규 시니어는 스냅샷이 없어 두 scope 모두
+    null로 응답한다(200) - "순위 없음"은 오류가 아니라 정상 상태이고, 클라이언트
+    입장에서도 404 분기보다 null 처리가 단순하다.
+
+    권한은 IsSeniorSelf 재사용 - URL senior_id가 토큰 본인과 다르면 403.
+    """
+    permission_classes = (IsSeniorSelf,)
+
+    def get(self, request, senior_id):
+        snapshots = latest_ranking(request.user)
+        return Response({
+            scope: RankingSnapshotSerializer(snapshot).data if snapshot else None
+            for scope, snapshot in snapshots.items()
+        })

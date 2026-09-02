@@ -63,13 +63,14 @@
 | | GET·PATCH | `emergency/{event_id}/` — GET은 `emergency_notification`·`camera_access_grant` nested / PATCH는 status 전이(`notified` 제외) | `IsSeniorOrGuardian` + `_visible_emergency_events` |
 | | POST | `emergency/{event_id}/notify/` — 알림 row 생성 (FCM 실발송은 범위 밖) | `IsSeniorOrGuardian` |
 | | POST·DELETE | `emergency/{event_id}/camera-grant/` — DELETE는 즉시 만료 처리 | `IsSeniorOrGuardian` |
-| **게임화** | — | (엔드포인트 없음) | — |
+| **게임화** | GET | `senior/{senior_id}/ranking/` — `{national, regional}` 최신 스냅샷 (없으면 `null`+200) | `IsSeniorSelf` |
 
 - 매핑 등록(POST `.../seniors/`)은 `registered_via` + (`login_id` | `barcode_code`)를 받아 **서버가 senior를 조회**한다. 중복 등록 **409**, 미존재 식별자 **404**. 판단 근거는 `DB_SCHEMA.md` "API 연동 관련 메모" 참고.
+- 게임화(2026-09-02 구현): 스케줄러가 없어 `api/gamification.py`가 **세션 완료(`exercise_session.completion_rate` 기록) 시점**에 `Senior.fruit_count`(세션당 +1, 하루 6개 상한, 전량 재계산 방식이라 멱등)와 `ranking_snapshot`(national/regional, `score`="이번 달 완료 세션 수", 표준 경쟁 순위, `regional`은 `senior.address`에서 뽑은 "시/도+구/군" 접두어(`region_key()`)로 그룹핑 — 자유 텍스트라 표기 흔들림엔 취약)을 함께 갱신한다. 수동 배치용 `python manage.py recalculate_rankings` 제공. 상세 근거는 `DB_SCHEMA.md` "API 연동 관련 메모".
 
 ### 시리얼라이저
 
-`api/serializers.py`에 13개 테이블 전 영역 작성 완료. 액션별로 분리돼 있다(예: `ExerciseMissionSerializer`/`...CreateSerializer`/`...StatusUpdateSerializer`, `ExerciseSession` start/complete/detail, `EmergencyEvent` 생성/status-update/detail). `PhysicalAbilityLogSerializer`·`ActivityLogSerializer`·`RankingSnapshotSerializer`는 작성돼 있으나 대응 뷰·URL이 아직 없다.
+`api/serializers.py`에 13개 테이블 전 영역 작성 완료. 액션별로 분리돼 있다(예: `ExerciseMissionSerializer`/`...CreateSerializer`/`...StatusUpdateSerializer`, `ExerciseSession` start/complete/detail, `EmergencyEvent` 생성/status-update/detail). `RankingSnapshotSerializer`는 `SeniorRankingView`가 scope별로 사용한다(전국/지역을 한 응답에 묶는 건 views.py 몫). `PhysicalAbilityLogSerializer`·`ActivityLogSerializer`는 작성돼 있으나 대응 뷰·URL이 아직 없다.
 
 ### 미구현 (구현 예정)
 
@@ -78,11 +79,10 @@
 | 인증 | 토큰 refresh(재발급), 로그아웃, 비밀번호 변경/재설정. 매핑 등록 전 시니어 검색 API 없음 |
 | 기록 | `senior/{id}/ability-log/` → `physical_ability_log` (시리얼라이저만 존재) |
 | 응급 | `activity_log`(무활동 감지 로그) 저장/조회 API — 모델·시리얼라이저만 존재 |
-| 게임화 | **섹션 전체 미구현.** `senior/{id}/ranking/` → `ranking_snapshot` 조회, `Senior.fruit_count` 증감(운동 보상) 로직 전무. 모델·시리얼라이저·admin만 존재 |
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET 엔드포인트 테스트 25건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET + 게임화(fruit_count·ranking) 테스트 36건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 

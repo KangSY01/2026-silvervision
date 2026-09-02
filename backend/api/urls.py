@@ -99,4 +99,9 @@ urlpatterns = [
     ),
 
     # 게임화 관련 URL
+    path(
+        'senior/<int:senior_id>/ranking/',
+        views.SeniorRankingView.as_view(),
+        name='senior-ranking',
+    ),
 ]

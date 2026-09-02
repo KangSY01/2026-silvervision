@@ -223,9 +223,11 @@
 - `/emergency/`, `/emergency/{event_id}/`, `.../notify/`, `.../camera-grant/` (POST/DELETE) → `emergency_event`, `emergency_notification`, `camera_access_grant`
   - (2026-09-02 추가) 이벤트 `GET` 목록/상세 구현. 목록/상세 모두 `_visible_emergency_events`(시니어 본인 소유 또는 `guardian_senior_map`으로 연결된 보호자에게 보이는 것)로 필터 — 다른 시니어 소속 `event_id` 접근 시 404. 상세 응답은 `emergency_notification`(`notifications`), `camera_access_grant`(`camera_grants`)를 nested 포함(둘 다 독립 조회 엔드포인트 없음). 생성은 시니어 본인만, 목록/상세는 시니어·보호자 모두.
 - `/exercises/`, `/exercises/{id}/` → `exercise` (2026-07-24: 문서에는 "구현 완료"로 표기돼 있었으나 실제 `views.py`/`urls.py`에는 라우팅·뷰가 없던 상태였고, 이번에 실제로 구현해 문서와 코드를 일치시킴)
+- `GET /senior/{id}/ranking/` → `ranking_snapshot` (2026-09-02 구현). 권한 `IsSeniorSelf`. 응답은 `{"national": <스냅샷>|null, "regional": <스냅샷>|null}` — scope별 최신(`snapshot_date` 기준) 스냅샷을 나란히 담는다. 완료 세션이 없는 신규 시니어는 두 scope 모두 `null` + `200`("순위 없음"은 정상 상태라 404가 아님).
+  - **순위 산정 방식** (배치 프로세스 부재에 대한 결정): 정식 스케줄러(Celery/cron) 대신, `POST/PATCH`로 세션이 완료 처리(`exercise_session.completion_rate`가 채워짐)될 때 `api/gamification.py`의 `recalculate_rankings()`가 **그 날짜의 national/regional 스냅샷을 전량 재계산해 upsert**한다. `score` = "그 달 1일부터 오늘까지 완료된 세션 수"(AI 경계와 무관한 단순 row 집계). `rank_position` = 같은 `snapshot_date`·`rank_scope` 내 `score` 내림차순 표준 경쟁 순위(동점 동순위: 1,2,2,4). `regional`은 `senior.address` 전체 문자열이 아니라 거기서 뽑은 **"시/도 + 구/군" 접두어**(`api/gamification.py`의 `region_key()`, 예: `"서울특별시 강남구 테헤란로 123"` → `"서울특별시 강남구"`)가 같은 시니어끼리 묶는다. 순위 풀은 해당 월에 완료 세션이 1건 이상인 시니어. `address`가 자유 입력 필드라 접두어 파싱이 완벽하지 않다 — 표기 흔들림(`서울시`/`서울특별시`), 시·도 생략, 상세주소를 앞에 쓴 경우, 오타·영문 주소는 잘못 묶이거나 단독 그룹이 된다. 정확한 그룹핑이 필요하면 행정구역 코드 컬럼을 추가해야 한다. 순위 대상 시니어 수가 적은 프로젝트 규모라 매 완료마다 전량 재계산해도 부담이 없다고 판단했고, 커지면 `python manage.py recalculate_rankings`(신규 management command)로 배치 전환 가능하다.
+- `Senior.fruit_count` 증감(운동 보상) — `exercise_session` 완료(`completion_rate` 기록) 시 `api/gamification.py`의 `recompute_fruit_count()`가 트리거된다. 세션 1회 완료당 열매 1개(`FRUIT_PER_SESSION`), **하루 최대 6개**(`FRUIT_DAILY_CAP`, 프론트 "6개 중 N개 획득" 표현에 맞춤). 단순 +1이 아니라 완료 세션 기록으로부터 `fruit_count`를 전량 재계산(일자별 `min(완료 수, 6)`의 합)하므로 같은 세션을 다시 PATCH해도 이중 지급되지 않는다.
 
 **구현 예정**
-- `/senior/{id}/ranking/` → `ranking_snapshot`
 - `/senior/{id}/ability-log/` → `physical_ability_log`
 - `/senior/{id}/activity-log/` → `activity_log`
 

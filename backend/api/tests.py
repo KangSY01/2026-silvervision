@@ -15,6 +15,7 @@ from .models import (
     Guardian,
     GuardianSeniorMap,
     PoseFeedback,
+    RankingSnapshot,
     Senior,
 )
 
@@ -28,10 +29,10 @@ def _access_token(role, user_id):
 
 
 class ApiTestBase(APITestCase):
-    def make_senior(self, login_id, barcode_code, name='시니어'):
+    def make_senior(self, login_id, barcode_code, name='시니어', address='서울시'):
         senior = Senior(
             login_id=login_id, name=name, phone='01000000000',
-            address='서울시', mobility_level=Senior.MobilityLevel.INDEPENDENT,
+            address=address, mobility_level=Senior.MobilityLevel.INDEPENDENT,
             barcode_code=barcode_code,
         )
         senior.set_password('abcd1234')
@@ -317,3 +318,156 @@ class EmergencyEventReadTests(ApiTestBase):
             format='json',
         )
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+
+class GamificationTests(ApiTestBase):
+    def setUp(self):
+        self.exercise = self.make_exercise()
+        self.senior = self.make_senior('senior1', 'BARCODE-1', name='갑', address='서울시')
+        self.same_region = self.make_senior(
+            'senior2', 'BARCODE-2', name='을', address='서울시',
+        )
+        self.other_region = self.make_senior(
+            'senior3', 'BARCODE-3', name='병', address='부산시',
+        )
+
+    def _complete_session(self, senior, completion_rate='80.00'):
+        """세션을 만들고 PATCH로 완료 처리한다 (실제 API 흐름)."""
+        session = self.make_session(senior, self.exercise)
+        self.auth('senior', senior.senior_id)
+        url = (
+            f'/api/v1/senior/{senior.senior_id}'
+            f'/sessions/{session.session_id}/'
+        )
+        res = self.client.patch(
+            url, {'completion_rate': completion_rate}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return session
+
+    def _ranking(self, senior):
+        self.auth('senior', senior.senior_id)
+        res = self.client.get(f'/api/v1/senior/{senior.senior_id}/ranking/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return res.data
+
+    def test_completing_session_increments_fruit_count(self):
+        self._complete_session(self.senior)
+        self.senior.refresh_from_db()
+        self.assertEqual(self.senior.fruit_count, 1)
+
+    def test_fruit_count_respects_daily_cap(self):
+        for _ in range(8):
+            self._complete_session(self.senior)
+        self.senior.refresh_from_db()
+        self.assertEqual(self.senior.fruit_count, 6)
+
+    def test_repeated_patch_does_not_double_award(self):
+        session = self._complete_session(self.senior)
+        url = (
+            f'/api/v1/senior/{self.senior.senior_id}'
+            f'/sessions/{session.session_id}/'
+        )
+        self.client.patch(url, {'completion_rate': '90.00'}, format='json')
+        self.senior.refresh_from_db()
+        self.assertEqual(self.senior.fruit_count, 1)
+
+    def test_setting_only_accuracy_does_not_award_or_rank(self):
+        session = self.make_session(self.senior, self.exercise)
+        self.auth('senior', self.senior.senior_id)
+        url = (
+            f'/api/v1/senior/{self.senior.senior_id}'
+            f'/sessions/{session.session_id}/'
+        )
+        res = self.client.patch(
+            url, {'accuracy_avg': '70.00'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.senior.refresh_from_db()
+        self.assertEqual(self.senior.fruit_count, 0)
+        self.assertFalse(
+            RankingSnapshot.objects.filter(senior=self.senior).exists()
+        )
+
+    def test_ranking_snapshot_created_on_completion(self):
+        self._complete_session(self.senior)
+        data = self._ranking(self.senior)
+        self.assertIsNotNone(data['national'])
+        self.assertIsNotNone(data['regional'])
+        self.assertEqual(data['national']['score'], 1)
+        self.assertEqual(data['national']['rank_position'], 1)
+        self.assertEqual(data['regional']['rank_scope'], 'regional')
+
+    def test_rank_position_reflects_relative_scores(self):
+        self._complete_session(self.senior)
+        self._complete_session(self.senior)
+        self._complete_session(self.same_region)
+
+        top = self._ranking(self.senior)
+        self.assertEqual(top['national']['score'], 2)
+        self.assertEqual(top['national']['rank_position'], 1)
+
+        second = self._ranking(self.same_region)
+        self.assertEqual(second['national']['score'], 1)
+        self.assertEqual(second['national']['rank_position'], 2)
+
+    def test_regional_ranking_grouped_by_address(self):
+        self._complete_session(self.senior)
+        self._complete_session(self.senior)
+        self._complete_session(self.other_region)
+
+        seoul = self._ranking(self.senior)
+        busan = self._ranking(self.other_region)
+
+        # 전국은 점수순(서울 2점 1위, 부산 1점 2위)
+        self.assertEqual(seoul['national']['rank_position'], 1)
+        self.assertEqual(busan['national']['rank_position'], 2)
+        # 지역은 각자 자기 주소 그룹에서 1위
+        self.assertEqual(seoul['regional']['rank_position'], 1)
+        self.assertEqual(busan['regional']['rank_position'], 1)
+
+    def test_regional_grouping_uses_sido_gugun_prefix(self):
+        # 상세주소(도로명/동)가 달라도 "시/도 + 구/군" 접두어가 같으면 한 그룹
+        gangnam_a = self.make_senior(
+            's-gn-a', 'BC-GN-A', address='서울특별시 강남구 테헤란로 123',
+        )
+        gangnam_b = self.make_senior(
+            's-gn-b', 'BC-GN-B', address='서울특별시 강남구 역삼동 45',
+        )
+        seocho = self.make_senior(
+            's-sc', 'BC-SC', address='서울특별시 서초구 서초대로 1',
+        )
+        self._complete_session(gangnam_a)
+        self._complete_session(gangnam_a)
+        self._complete_session(gangnam_b)
+        self._complete_session(seocho)
+
+        a = self._ranking(gangnam_a)
+        b = self._ranking(gangnam_b)
+        c = self._ranking(seocho)
+
+        # 강남구 그룹: A(2점) 1위, B(1점) 2위
+        self.assertEqual(a['regional']['rank_position'], 1)
+        self.assertEqual(b['regional']['rank_position'], 2)
+        # 서초구 그룹: C 단독 1위
+        self.assertEqual(c['regional']['rank_position'], 1)
+
+    def test_new_senior_ranking_returns_nulls(self):
+        data = self._ranking(self.senior)
+        self.assertIsNone(data['national'])
+        self.assertIsNone(data['regional'])
+
+    def test_other_senior_ranking_forbidden(self):
+        self._complete_session(self.senior)
+        self.auth('senior', self.same_region.senior_id)
+        res = self.client.get(
+            f'/api/v1/senior/{self.senior.senior_id}/ranking/'
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_ranking_requires_auth(self):
+        self.logout()
+        res = self.client.get(
+            f'/api/v1/senior/{self.senior.senior_id}/ranking/'
+        )
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
