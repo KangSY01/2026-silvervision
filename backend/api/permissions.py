@@ -17,10 +17,11 @@ class IsOwnerSelf(BasePermission):
     """
     URL의 {id}와 토큰 소유자 본인이 일치할 때만 허용하는 공통 로직
     (IDOR 방지, claude-security-guidance.md). 뷰마다 "본인 확인" if문을
-    반복하지 않도록 재사용 가능한 permission으로 만들었다 - 지금 당장은
-    senior/guardian 프로필 뷰 2곳이지만, AGENTS.md에 예정된
-    `/senior/{id}/sessions/`, `/senior/{id}/activity-log/` 등 앞으로
-    추가될 "본인 리소스만 접근" 엔드포인트에도 그대로 재사용된다.
+    반복하지 않도록 재사용 가능한 permission으로 만들었다 - 현재
+    `IsSeniorSelf`는 시니어 프로필 / 미션 목록·생성·상태변경 / 세션
+    목록·상세·피드백 뷰에서, `IsGuardianSelf`는 보호자 프로필 / 보호자-
+    피보호자 매핑 목록·등록·해제 뷰에서 쓰인다. `/senior/{id}/ability-log/`
+    등 앞으로 추가될 "본인 리소스만 접근" 엔드포인트에도 그대로 재사용된다.
 
     model/url_kwarg/user_pk_attr을 서브클래스에서 지정한다.
     """

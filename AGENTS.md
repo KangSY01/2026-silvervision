@@ -30,5 +30,5 @@ API 연동 작업을 할 때는:
 
 ## 현재 진행 상태
 
-- **프론트엔드**: 시니어 화면 8개 + 보호자 화면 9개(총 17개) 및 네비게이션 전체 포팅 완료 (목업 데이터 기준). 백엔드 미연동 상태라 모든 데이터는 `AppStateContext`의 목업(mock)이다. 자세한 내용은 [frontend/AGENTS.md](frontend/AGENTS.md) 참고.
-- **백엔드**: Django 프로젝트 세팅 완료(MySQL 연결, JWT/CORS 등 설정 완료), DB 모델 13개 테이블 전체 구현 완료, 시리얼라이저 구현 진행 중(계정/운동/기록 계열 완료). API 뷰(`views.py`)·URL 라우팅은 아직 미구현. 자세한 내용은 [backend/AGENTS.md](backend/AGENTS.md) 참고.
+- **프론트엔드**: 시니어 화면 8개 + 보호자 화면 9개(총 17개) 및 네비게이션 전체 포팅 완료. 백엔드 API 연동은 화면 단위로 진행 중이며 현재 3개 화면(시니어 로그인, 보호자 로그인, 운동 선택)이 실제 API를 쓰고, 나머지는 `AppStateContext` 목업(mock)이다. 공통 API 클라이언트는 `src/api/client.ts`. 자세한 내용은 [frontend/AGENTS.md](frontend/AGENTS.md) 참고.
+- **백엔드**: Django 세팅 완료(MySQL, JWT/CORS), DB 모델 13개 테이블 + 마이그레이션 `0001`~`0006` 적용 완료, 시리얼라이저 13개 테이블 전 영역 작성 완료. 커스텀 JWT 인증(`RoleBasedJWTAuthentication`)·권한 클래스·API 뷰·URL 라우팅(`config/urls.py`에 `/api/v1/` 연결)까지 인증/계정/운동/기록/응급 5개 섹션 구현 완료. 미구현은 게임화 섹션 전체, `physical_ability_log`/`activity_log` API, 토큰 refresh·로그아웃. 자세한 내용은 [backend/AGENTS.md](backend/AGENTS.md) 5장 참고.
