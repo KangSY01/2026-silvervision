@@ -1,3 +1,4 @@
+from django.db import IntegrityError
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -20,7 +21,9 @@ from .models import (
 )
 from .permissions import IsGuardianSelf, IsSenior, IsSeniorOrGuardian, IsSeniorSelf
 from .serializers import (
+    AlreadyRegistered,
     CameraAccessGrantSerializer,
+    EmergencyEventDetailSerializer,
     EmergencyEventSerializer,
     EmergencyEventStatusUpdateSerializer,
     EmergencyNotificationSerializer,
@@ -29,11 +32,14 @@ from .serializers import (
     ExerciseMissionStatusUpdateSerializer,
     ExerciseSerializer,
     ExerciseSessionCompleteSerializer,
+    ExerciseSessionDetailSerializer,
     ExerciseSessionSerializer,
     ExerciseSessionStartSerializer,
     GuardianLoginSerializer,
     GuardianProfileSerializer,
     GuardianRegisterSerializer,
+    GuardianSeniorMapCreateSerializer,
+    GuardianSeniorMapSerializer,
     PoseFeedbackSerializer,
     SeniorLoginSerializer,
     SeniorProfileSerializer,
@@ -147,6 +153,65 @@ class GuardianDetailView(generics.RetrieveUpdateAPIView):
     lookup_url_kwarg = 'guardian_id'
 
 
+class GuardianSeniorListCreateView(generics.ListCreateAPIView):
+    """
+    GET  - 보호자 본인에게 등록된 피보호자 매핑 목록 (최신순).
+    POST - 피보호자 신규 등록. body는 registered_via + (login_id | barcode_code)
+           이며 서버가 senior를 조회한다 (GuardianSeniorMapCreateSerializer 참고).
+
+    IsGuardianSelf가 URL guardian_id == 토큰 본인을 보장하고, get_queryset도
+    그 guardian_id로 필터링해 다른 보호자의 매핑이 섞이지 않게 한다.
+    """
+    permission_classes = (IsGuardianSelf,)
+
+    def get_queryset(self):
+        return GuardianSeniorMap.objects.filter(
+            guardian_id=self.kwargs['guardian_id']
+        ).select_related('senior').order_by('-created_at')
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return GuardianSeniorMapCreateSerializer
+        return GuardianSeniorMapSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # IsGuardianSelf 통과 = request.user가 URL guardian_id 본인.
+        context['guardian'] = self.request.user
+        return context
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            mapping = serializer.save()
+        except IntegrityError:
+            # 시리얼라이저 validate()의 사전 중복 확인과 실제 저장 사이
+            # 경합으로 unique_together가 걸리는 경우도 409로 통일한다.
+            raise AlreadyRegistered()
+        output = GuardianSeniorMapSerializer(mapping)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
+class GuardianSeniorDetailView(generics.DestroyAPIView):
+    """
+    DELETE - 보호자-피보호자 연결 해제. URL은 map_id가 아니라 senior_id로
+    지정한다(클라이언트는 피보호자 목록에서 senior 기준으로 해제하므로).
+    해당 보호자에게 그 피보호자가 연결돼 있지 않으면 404.
+    """
+    permission_classes = (IsGuardianSelf,)
+
+    def get_queryset(self):
+        return GuardianSeniorMap.objects.filter(
+            guardian_id=self.kwargs['guardian_id']
+        )
+
+    def get_object(self):
+        return get_object_or_404(
+            self.get_queryset(), senior_id=self.kwargs['senior_id']
+        )
+
+
 class ExerciseListView(generics.ListAPIView):
     """
     운동 콘텐츠 마스터 목록 조회. 개인정보나 소유권과 무관한 공용 데이터라
@@ -230,16 +295,27 @@ class ExerciseMissionStatusUpdateView(generics.UpdateAPIView):
         )
 
 
-class ExerciseSessionStartView(generics.CreateAPIView):
+class ExerciseSessionListCreateView(generics.ListCreateAPIView):
     """
-    body에서 mission만 받는다. senior_id 소속이 아닌 mission을 보내면
-    ExerciseSessionStartSerializer.validate_mission이 400으로 거부한다
-    (URL이 아니라 body로 들어온 참조값의 유효성 문제라 403/404가 아닌
-    400을 택했다 - V6에서 URL 자체가 가리키는 자원에 대한 권한 문제를
-    403/404로 구분한 것과는 다른 범주).
+    GET  - 이 시니어의 세션 목록 (최신순). IsSeniorSelf + get_queryset의
+           senior_id 필터로 본인 세션만 나온다.
+    POST - 세션 시작. body에서 mission만 받는다. senior_id 소속이 아닌
+           mission을 보내면 ExerciseSessionStartSerializer.validate_mission이
+           400으로 거부한다 (URL이 아니라 body로 들어온 참조값의 유효성
+           문제라 403/404가 아닌 400을 택했다 - V6에서 URL 자체가 가리키는
+           자원에 대한 권한 문제를 403/404로 구분한 것과는 다른 범주).
     """
-    serializer_class = ExerciseSessionStartSerializer
     permission_classes = (IsSeniorSelf,)
+
+    def get_queryset(self):
+        return ExerciseSession.objects.filter(
+            senior_id=self.kwargs['senior_id']
+        ).order_by('-created_at')
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return ExerciseSessionStartSerializer
+        return ExerciseSessionSerializer
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -257,22 +333,27 @@ class ExerciseSessionStartView(generics.CreateAPIView):
         return Response(output.data, status=status.HTTP_201_CREATED)
 
 
-class ExerciseSessionCompleteView(generics.UpdateAPIView):
+class ExerciseSessionDetailView(generics.RetrieveUpdateAPIView):
     """
-    completion_rate/accuracy_avg 저장 전용 PATCH. session_id가 URL의
-    senior_id 소속이 아니면 get_queryset() 필터링 때문에 조회되지 않아
-    404가 된다 (V6의 미션 PATCH와 동일한 기준).
+    GET   - 세션 상세 (연결된 pose_feedback 포함, ExerciseSessionDetailSerializer).
+    PATCH - completion_rate/accuracy_avg 저장 (ExerciseSessionCompleteSerializer).
+    session_id가 URL의 senior_id 소속이 아니면 get_queryset() 필터링 때문에
+    조회되지 않아 404가 된다 (V6의 미션 PATCH와 동일한 기준).
     """
-    serializer_class = ExerciseSessionCompleteSerializer
     permission_classes = (IsSeniorSelf,)
     lookup_field = 'pk'
     lookup_url_kwarg = 'session_id'
-    http_method_names = ['patch']
+    http_method_names = ['get', 'patch']
 
     def get_queryset(self):
         return ExerciseSession.objects.filter(
             senior_id=self.kwargs['senior_id']
         )
+
+    def get_serializer_class(self):
+        if self.request.method == 'PATCH':
+            return ExerciseSessionCompleteSerializer
+        return ExerciseSessionDetailSerializer
 
 
 class SessionFeedbackCreateView(generics.CreateAPIView):
@@ -326,15 +407,28 @@ def _visible_emergency_events(user):
     return EmergencyEvent.objects.none()
 
 
-class EmergencyEventCreateView(generics.CreateAPIView):
+class EmergencyEventListCreateView(generics.ListCreateAPIView):
     """
-    AGENTS.md 기준 이벤트는 시니어 기기(비전 모델/센서)가 감지해서
-    보내는 것이라 시니어 본인만 생성 가능하다. URL에 senior_id가 없어
-    "본인 여부 대조"가 필요 없으므로(비교할 URL 값 자체가 없음) 신규
-    권한 클래스 없이 기존 IsSenior만으로 충분하다.
+    GET  - 요청자에게 보이는 이벤트 목록 (시니어 본인 것 또는
+           guardian_senior_map으로 연결된 보호자에게 보이는 것, 최신순).
+           _visible_emergency_events 쿼리셋을 그대로 재사용한다.
+    POST - 이벤트 생성. AGENTS.md 기준 이벤트는 시니어 기기(비전 모델/
+           센서)가 감지해 보내는 것이라 시니어 본인만 가능하다 - 목록은
+           보호자도 봐야 하므로 method별로 권한을 나눈다.
     """
-    serializer_class = EmergencyEventSerializer
-    permission_classes = (IsSenior,)
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsSenior()]
+        return [IsSeniorOrGuardian()]
+
+    def get_serializer_class(self):
+        # 목록·생성 응답 모두 EmergencyEventSerializer (기존 생성 응답 유지).
+        return EmergencyEventSerializer
+
+    def get_queryset(self):
+        return _visible_emergency_events(self.request.user).order_by(
+            '-created_at'
+        )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -343,18 +437,28 @@ class EmergencyEventCreateView(generics.CreateAPIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
-class EmergencyEventStatusUpdateView(generics.UpdateAPIView):
+class EmergencyEventDetailView(generics.RetrieveUpdateAPIView):
     """
-    PATCH 전용 - status만 변경. 시니어 본인 또는 연동된 보호자 모두
-    허용(claude-security-guidance.md). 허용되지 않는 상태 전이는
-    EmergencyEventStatusUpdateSerializer.validate_status가 400으로
-    거부한다.
+    GET   - 이벤트 상세 (연결된 emergency_notification, camera_access_grant
+            이력을 nested로 포함, EmergencyEventDetailSerializer).
+    PATCH - status만 변경 (EmergencyEventStatusUpdateSerializer). 허용되지
+            않는 상태 전이는 validate_status가 400으로 거부한다.
+    시니어 본인 또는 연동된 보호자만 허용하고(claude-security-guidance.md),
+    _visible_emergency_events 쿼리셋으로 조회해 다른 시니어 소속 event_id는
+    404가 된다.
     """
-    serializer_class = EmergencyEventStatusUpdateSerializer
     permission_classes = (IsSeniorOrGuardian,)
     lookup_field = 'pk'
     lookup_url_kwarg = 'event_id'
-    http_method_names = ['patch']
+    http_method_names = ['get', 'patch']
+
+    def get_queryset(self):
+        return _visible_emergency_events(self.request.user)
+
+    def get_serializer_class(self):
+        if self.request.method == 'PATCH':
+            return EmergencyEventStatusUpdateSerializer
+        return EmergencyEventDetailSerializer
 
     def get_queryset(self):
         return _visible_emergency_events(self.request.user)

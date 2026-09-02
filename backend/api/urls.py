@@ -32,6 +32,16 @@ urlpatterns = [
         'guardian/<int:guardian_id>/', views.GuardianDetailView.as_view(),
         name='guardian-detail',
     ),
+    path(
+        'guardian/<int:guardian_id>/seniors/',
+        views.GuardianSeniorListCreateView.as_view(),
+        name='guardian-senior-list',
+    ),
+    path(
+        'guardian/<int:guardian_id>/seniors/<int:senior_id>/',
+        views.GuardianSeniorDetailView.as_view(),
+        name='guardian-senior-detail',
+    ),
 
     # 운동 관련 URL
     path('exercises/', views.ExerciseListView.as_view(), name='exercise-list'),
@@ -53,13 +63,13 @@ urlpatterns = [
     # 기록 관련 URL
     path(
         'senior/<int:senior_id>/sessions/',
-        views.ExerciseSessionStartView.as_view(),
-        name='senior-session-start',
+        views.ExerciseSessionListCreateView.as_view(),
+        name='senior-session-list',
     ),
     path(
         'senior/<int:senior_id>/sessions/<int:session_id>/',
-        views.ExerciseSessionCompleteView.as_view(),
-        name='senior-session-complete',
+        views.ExerciseSessionDetailView.as_view(),
+        name='senior-session-detail',
     ),
     path(
         'senior/<int:senior_id>/sessions/<int:session_id>/feedback/',
@@ -69,13 +79,13 @@ urlpatterns = [
 
     # 응급 관련 URL
     path(
-        'emergency/', views.EmergencyEventCreateView.as_view(),
-        name='emergency-event-create',
+        'emergency/', views.EmergencyEventListCreateView.as_view(),
+        name='emergency-event-list',
     ),
     path(
         'emergency/<int:event_id>/',
-        views.EmergencyEventStatusUpdateView.as_view(),
-        name='emergency-event-status-update',
+        views.EmergencyEventDetailView.as_view(),
+        name='emergency-event-detail',
     ),
     path(
         'emergency/<int:event_id>/notify/',
