@@ -214,6 +214,7 @@
 **구현 완료**
 - `/auth/senior/register/`, `/auth/senior/login/` → `senior`
 - `/auth/guardian/register/`, `/auth/guardian/login/` → `guardian`
+- `POST /auth/token/refresh/` (access token 재발급), `POST /auth/logout/` (refresh token 무효화) — (2026-09-02 구현). 이 스키마의 13개 테이블과 무관하며, 로그아웃 blacklist용으로 `rest_framework_simplejwt.token_blacklist` 앱이 자체 테이블 2개(`token_blacklist_outstandingtoken`, `token_blacklist_blacklistedtoken`)를 추가한다(라이브러리 관리, `migrate`만 필요). 상세 근거는 AGENTS.md 5장 "인증/권한".
 - `/senior/{id}/`, `/guardian/{id}/` (조회/수정) → `senior`, `guardian`
 - `/guardian/{id}/seniors/` (GET 목록 / POST 등록), `.../seniors/{senior_id}/` (DELETE 해제) → `guardian_senior_map`
   - (2026-09-02 구현) POST body는 `registered_via` + (`login_id` | `barcode_code`)이며, 두 값 모두 `senior` 테이블에 UNIQUE라 **서버가 senior를 조회**한다 (클라이언트가 senior_id를 직접 보내지 않음 → `registered_via`가 실제 조회 경로를 정확히 반영). `(guardian, senior)` UNIQUE 위반(중복 등록)은 **409**, 존재하지 않는 식별자는 **404**. 승인 절차는 스키마·화면에 없어 등록 즉시 연결된다.
@@ -235,6 +236,6 @@
   - **GET은 필터 없이 전체 반환, `logged_date` 오름차순.** 하루 최대 1건이라 1년치도 365건뿐이라 activity-log 같은 기간/건수 필터가 불필요하고, 주/월 단위 추이 그래프가 시간 오름차순으로 그려지므로 정렬도 오름차순으로 맞췄다.
 
 **구현 예정**
-- (스키마 직결 엔드포인트는 없음 — `senior`/`guardian` 프로필 관련 인증 부가 기능만 남음. AGENTS.md 5장 "미구현" 표 참고)
+- (스키마 직결 엔드포인트는 없음 — 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API만 남음. AGENTS.md 5장 "미구현" 표 참고)
 
 이번 재개발은 이 문서(v2 스키마)를 기준으로 처음부터 다시 구현하며, 위 API 목록은 우선순위 참고용이지 기존 코드가 남아있다는 의미는 아니다 (완전히 새로 작성).

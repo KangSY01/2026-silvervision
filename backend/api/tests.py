@@ -731,3 +731,68 @@ class PhysicalAbilityLogTests(ApiTestBase):
             self.client.get(self.url).status_code,
             status.HTTP_401_UNAUTHORIZED,
         )
+
+
+class TokenRefreshLogoutTests(ApiTestBase):
+    """토큰 refresh(재발급) + 로그아웃(refresh token blacklist)."""
+
+    def setUp(self):
+        self.senior = self.make_senior('s1', 'BC1')
+        self.refresh_url = '/api/v1/auth/token/refresh/'
+        self.logout_url = '/api/v1/auth/logout/'
+
+    def _login(self):
+        res = self.client.post(
+            '/api/v1/auth/senior/login/',
+            {'login_id': 's1', 'password': 'abcd1234'},
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        return res.data
+
+    def test_refresh_issues_access_with_role_claims(self):
+        tokens = self._login()
+        res = self.client.post(
+            self.refresh_url, {'refresh': tokens['refresh']}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        # 새 access token으로 본인 리소스에 접근되면 role/user_id 클레임이
+        # 정상 복사된 것이다.
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f'Bearer {res.data["access"]}'
+        )
+        detail = self.client.get(f'/api/v1/senior/{self.senior.senior_id}/')
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+
+    def test_refresh_missing_field_is_400(self):
+        res = self.client.post(self.refresh_url, {}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_refresh_invalid_token_is_401_with_detail(self):
+        res = self.client.post(
+            self.refresh_url, {'refresh': 'not-a-real-token'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn('detail', res.data)
+
+    def test_logout_blacklists_refresh_token(self):
+        tokens = self._login()
+        res = self.client.post(
+            self.logout_url, {'refresh': tokens['refresh']}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_205_RESET_CONTENT)
+        # 로그아웃한 refresh token으로는 더 이상 재발급되지 않는다.
+        again = self.client.post(
+            self.refresh_url, {'refresh': tokens['refresh']}, format='json',
+        )
+        self.assertEqual(again.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_missing_field_is_400(self):
+        res = self.client.post(self.logout_url, {}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_logout_is_idempotent_for_invalid_token(self):
+        res = self.client.post(
+            self.logout_url, {'refresh': 'garbage'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_205_RESET_CONTENT)

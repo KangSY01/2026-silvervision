@@ -44,6 +44,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    # 로그아웃 시 refresh token을 무효화(blacklist)하기 위한 앱. 마이그레이션은
+    # 패키지에 동봉돼 있어 makemigrations는 불필요하고 migrate만 하면 된다.
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'api',
 ]

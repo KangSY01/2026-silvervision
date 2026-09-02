@@ -22,6 +22,14 @@ urlpatterns = [
         'auth/guardian/login/', views.GuardianLoginView.as_view(),
         name='guardian-login',
     ),
+    path(
+        'auth/token/refresh/', views.TokenRefreshView.as_view(),
+        name='token-refresh',
+    ),
+    path(
+        'auth/logout/', views.LogoutView.as_view(),
+        name='logout',
+    ),
 
     # 계정 관련 URL
     path(

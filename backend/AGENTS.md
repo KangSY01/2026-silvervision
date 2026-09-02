@@ -8,7 +8,7 @@
 
 - Django 6.0.7 (Python 3.12, venv는 `backend/venv/`)
 - MySQL 8.x + `mysqlclient` — `config/settings.py`의 `DATABASES`가 `.env`(`DB_NAME`/`DB_USER`/`DB_PASSWORD`/`DB_HOST`/`DB_PORT`)를 읽는다
-- `djangorestframework` + `djangorestframework_simplejwt` — JWT 인증 (커스텀 인증/권한 클래스는 5장 참고)
+- `djangorestframework` + `djangorestframework_simplejwt` — JWT 인증 (커스텀 인증/권한 클래스는 5장 참고). `rest_framework_simplejwt.token_blacklist` 앱을 `INSTALLED_APPS`에 추가해 로그아웃 시 refresh token을 실제로 무효화한다(마이그레이션은 패키지 동봉, `migrate`만 필요).
 - `django-cors-headers` — 개발 단계 CORS 전체 허용(`CORS_ALLOW_ALL_ORIGINS = True`)
 - `python-dotenv` — `SECRET_KEY` 등 비밀값을 `.env`에서 로드 (`.env`는 git에 커밋하지 않음, `.env.example` 참고)
 
@@ -35,12 +35,14 @@
 
 ### 모델 / 마이그레이션
 
-`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0006` MySQL 적용 및 컬럼/FK 검증 완료.
+`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0006` MySQL 적용 및 컬럼/FK 검증 완료. 그 외 `token_blacklist` 앱이 자체 테이블 2개(`OutstandingToken`/`BlacklistedToken`)를 추가하나 라이브러리가 관리하며 `api` 앱 마이그레이션에는 영향이 없다(`makemigrations --check`는 여전히 "No changes").
 
 ### 인증 / 권한 (구현 완료)
 
 - `Senior`/`Guardian`은 독립된 두 로그인 주체라 `AUTH_USER_MODEL`로 통합하지 않고 각각 일반 모델 + `set_password`/`check_password`(Django hasher)로 처리한다. JWT는 로그인 뷰(`views._issue_tokens`)에서 직접 발급하며 `role: senior|guardian` + `user_id` 커스텀 클레임을 담는다.
 - `api/authentication.py`의 **`RoleBasedJWTAuthentication`**(`JWTAuthentication` 서브클래스)가 `settings.REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES']`에 등록돼 있고, 토큰의 `role` 클레임으로 `Senior`/`Guardian` 중 조회할 모델을 정해 `request.user`에 담는다.
+- **토큰 재발급(`POST /auth/token/refresh/`)**: simplejwt 5.5의 내장 `TokenRefreshSerializer`는 refresh token의 `user_id` 클레임(= `USER_ID_CLAIM` 기본값 `"user_id"`, `_issue_tokens`가 심는 커스텀 클레임과 이름이 겹침)으로 `AUTH_USER_MODEL`을 무조건 조회하는데, 이 프로젝트는 Senior/Guardian을 `AUTH_USER_MODEL`로 통합하지 않아 항상 `User.DoesNotExist`로 터진다. 그래서 사용자 모델 조회를 걷어낸 커스텀 `TokenRefreshSerializer`(`api/serializers.py`)로 교체했다 — 토큰 서명·만료·blacklist 검증만 하고, `no_copy_claims`(token_type/exp/jti/iat) 외 커스텀 클레임(role/user_id)은 simplejwt가 새 access token으로 복사한다. `ROTATE_REFRESH_TOKENS`는 기본값(False)이라 응답은 `{access}`만. 뷰(`TokenRefreshView`)는 내장 뷰 골격을 재사용하되 만료·위조·blacklist 토큰 에러를 `{'detail': 한국어}` 401로 정규화한다.
+- **로그아웃(`POST /auth/logout/`)**: 클라이언트 로컬 삭제(`clearSession`)만으로 끝내지 않고 서버에서 refresh token을 blacklist해 실제로 무효화한다 — 응급 상황에서 보호자에게 카메라/GPS를 여는 서비스라 탈취된 refresh token(기본 수명 1일, rotation 미설정)이 로그아웃 후에도 access token을 계속 찍어내면 위험하다는 판단. `token_blacklist` 앱 + `migrate` 한 번이 비용의 전부. 권한 `AllowAny`(만료된 access로도 로그아웃 가능해야 하고 body의 refresh token 자체가 소유 증명), 이미 무효인 토큰도 205로 멱등 통과. 한계: blacklist는 refresh token만 걸리고 직전 발급된 access token은 남은 수명(기본 5분)동안 유효하다.
 - `api/permissions.py`: **`IsSenior`/`IsGuardian`**(타입 확인), **`IsOwnerSelf`**(URL `{id}` == 토큰 본인, IDOR 방지) + 서브클래스 **`IsSeniorSelf`/`IsGuardianSelf`**, **`IsSeniorOrGuardian`**(로그인 여부만). `IsOwnerSelf` 계열은 프로필·미션·세션·보호자매핑 뷰에서 재사용 중이다. `senior_id`가 URL에 없는 응급 엔드포인트는 `IsSeniorOrGuardian` + 각 뷰 `get_queryset()`의 `_visible_emergency_events`(본인 소유 또는 `GuardianSeniorMap` 연결 보호자) 필터로 권한을 처리한다.
 
 ### 엔드포인트 (섹션별 구현 현황)
@@ -49,6 +51,8 @@
 |---|---|---|---|
 | **인증** | POST | `auth/senior/register/`, `auth/senior/login/` | AllowAny |
 | | POST | `auth/guardian/register/`, `auth/guardian/login/` | AllowAny |
+| | POST | `auth/token/refresh/` — `{refresh}` → `{access}`. 만료·위조·blacklist 토큰은 `{'detail'}` 401 | AllowAny |
+| | POST | `auth/logout/` — `{refresh}` blacklist, 성공 205(무효 토큰도 멱등 통과) | AllowAny |
 | **계정** | GET·PUT·PATCH | `senior/{senior_id}/` | `IsSeniorSelf` |
 | | GET·PUT·PATCH | `guardian/{guardian_id}/` | `IsGuardianSelf` |
 | | GET·POST | `guardian/{guardian_id}/seniors/` — 매핑 목록 / 등록 | `IsGuardianSelf` |
@@ -72,19 +76,19 @@
 
 ### 시리얼라이저
 
-`api/serializers.py`에 13개 테이블 전 영역 작성 완료. 액션별로 분리돼 있다(예: `ExerciseMissionSerializer`/`...CreateSerializer`/`...StatusUpdateSerializer`, `ExerciseSession` start/complete/detail, `EmergencyEvent` 생성/status-update/detail). `RankingSnapshotSerializer`는 `SeniorRankingView`가 scope별로 사용한다(전국/지역을 한 응답에 묶는 건 views.py 몫). `ActivityLogSerializer`는 `senior` read-only + `ActivityLogListSerializer`(bulk_create) 구성으로 `ActivityLogListCreateView`가 쓴다. `PhysicalAbilityLogSerializer`는 `senior` read-only + `logged_date` optional + 점수 음수 거부 구성으로 `PhysicalAbilityLogListCreateView`가 조회·upsert 공용으로 쓴다. 13개 테이블 모두 대응 뷰·URL이 존재한다.
+`api/serializers.py`에 13개 테이블 전 영역 작성 완료. 액션별로 분리돼 있다(예: `ExerciseMissionSerializer`/`...CreateSerializer`/`...StatusUpdateSerializer`, `ExerciseSession` start/complete/detail, `EmergencyEvent` 생성/status-update/detail). `RankingSnapshotSerializer`는 `SeniorRankingView`가 scope별로 사용한다(전국/지역을 한 응답에 묶는 건 views.py 몫). `ActivityLogSerializer`는 `senior` read-only + `ActivityLogListSerializer`(bulk_create) 구성으로 `ActivityLogListCreateView`가 쓴다. `PhysicalAbilityLogSerializer`는 `senior` read-only + `logged_date` optional + 점수 음수 거부 구성으로 `PhysicalAbilityLogListCreateView`가 조회·upsert 공용으로 쓴다. 13개 테이블 모두 대응 뷰·URL이 존재한다. 인증 부가용으로 `TokenRefreshSerializer`(내장 대체, 사용자 모델 조회 제거)·`LogoutSerializer`(`refresh` 1필드)가 있다.
 
 ### 미구현 (구현 예정)
 
 | 섹션 | 항목 |
 |---|---|
-| 인증 | 토큰 refresh(재발급), 로그아웃, 비밀번호 변경/재설정. 매핑 등록 전 시니어 검색 API 없음 |
+| 인증 | 비밀번호 변경/재설정. 매핑 등록 전 시니어 검색 API 없음 |
 
-스키마 13개 테이블에 직결되는 CRUD 엔드포인트는 전부 구현됐다. 남은 건 인증 부가 기능(위 표)뿐이다.
+스키마 13개 테이블에 직결되는 CRUD 엔드포인트는 전부 구현됐다. 토큰 refresh·로그아웃도 구현 완료(위 인증 section 참고). 남은 건 비밀번호 변경/재설정과 시니어 검색 API뿐이다.
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 테스트 55건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) 테스트 61건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 

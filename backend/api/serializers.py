@@ -4,6 +4,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.exceptions import APIException, NotFound
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
     ActivityLog,
@@ -110,6 +111,43 @@ class SeniorLoginSerializer(serializers.Serializer):
 class GuardianLoginSerializer(serializers.Serializer):
     login_id = serializers.CharField()
     password = serializers.CharField(write_only=True)
+
+
+class TokenRefreshSerializer(serializers.Serializer):
+    """
+    access token 재발급용 — simplejwt 내장 시리얼라이저를 대체한다.
+
+    내장 `TokenRefreshSerializer`(simplejwt 5.5)는 refresh token의 `user_id`
+    클레임으로 `AUTH_USER_MODEL`을 조회하는데(`USER_ID_CLAIM` 기본값이
+    `"user_id"`라 이 프로젝트가 심는 커스텀 클레임 이름과 그대로 겹친다),
+    이 프로젝트는 Senior/Guardian을 `AUTH_USER_MODEL`로 통합하지 않아 그
+    조회가 항상 `User.DoesNotExist`로 터진다. 그래서 사용자 모델 조회
+    단계를 걷어내고 토큰의 서명·만료·blacklist 검증만 거친 뒤 새 access
+    token을 발급한다. role/user_id 등 커스텀 클레임은 simplejwt가
+    `no_copy_claims`(token_type/exp/jti/iat)를 제외하고 전부 새 access
+    token으로 복사하며, 그 토큰은 다음 요청에서 `RoleBasedJWTAuthentication`이
+    role로 Senior/Guardian을 조회한다.
+
+    `ROTATE_REFRESH_TOKENS`는 기본값(False)이라 refresh token은 그대로
+    재사용하고 응답에는 `access`만 담는다.
+    """
+    refresh = serializers.CharField()
+    access = serializers.CharField(read_only=True)
+
+    def validate(self, attrs):
+        # 서명/만료/타입/ blacklist 위반 시 TokenError → 뷰가 401로 정규화.
+        refresh = RefreshToken(attrs['refresh'])
+        return {'access': str(refresh.access_token)}
+
+
+class LogoutSerializer(serializers.Serializer):
+    """
+    로그아웃 시 무효화할 refresh token 한 개만 받는다. access token은 헤더로
+    오지만 blacklist 대상은 refresh token이라(simplejwt의 blacklist는
+    RefreshToken/SlidingToken에만 걸리고 AccessToken은 짧은 수명으로 자연
+    만료된다) body에서 별도로 받는다.
+    """
+    refresh = serializers.CharField()
 
 
 class MappedSeniorSerializer(serializers.ModelSerializer):

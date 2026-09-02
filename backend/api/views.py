@@ -8,7 +8,9 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView as BaseTokenRefreshView
 
 from .models import (
     ActivityLog,
@@ -46,12 +48,14 @@ from .serializers import (
     GuardianRegisterSerializer,
     GuardianSeniorMapCreateSerializer,
     GuardianSeniorMapSerializer,
+    LogoutSerializer,
     PhysicalAbilityLogSerializer,
     PoseFeedbackSerializer,
     RankingSnapshotSerializer,
     SeniorLoginSerializer,
     SeniorProfileSerializer,
     SeniorRegisterSerializer,
+    TokenRefreshSerializer,
     is_valid_emergency_transition,
 )
 
@@ -136,6 +140,71 @@ class GuardianLoginView(APIView):
             )
 
         return Response(_issue_tokens('guardian', guardian.guardian_id))
+
+
+class TokenRefreshView(BaseTokenRefreshView):
+    """
+    access token 재발급. POST body에 `refresh`를 받아 새 `access`를 반환한다.
+
+    **내장 시리얼라이저는 이 프로젝트 구조에서 그대로 못 쓴다** — simplejwt
+    5.5의 `TokenRefreshSerializer.validate`는 refresh token의 `user_id`
+    클레임(`USER_ID_CLAIM` 기본값이 `"user_id"`라 `_issue_tokens`가 심는
+    커스텀 클레임과 이름이 겹친다)으로 `AUTH_USER_MODEL`을 무조건 조회하는데,
+    Senior/Guardian을 `AUTH_USER_MODEL`로 통합하지 않은 이 프로젝트에서는
+    그 조회가 항상 `User.DoesNotExist`로 터진다. 그래서 사용자 모델 조회를
+    걷어낸 `api.serializers.TokenRefreshSerializer`로 교체한다(토큰 서명·
+    만료·blacklist 검증 → 커스텀 클레임 복사만). 내장 `TokenRefreshView`
+    골격(POST 처리, TokenError→InvalidToken 변환)은 그대로 재사용한다.
+
+    또 하나의 커스텀은 에러 응답 정규화다: 내장 뷰는 만료·위조·blacklist된
+    refresh token에 `InvalidToken`을 던져 `{detail, code, messages:[...]}`
+    (내부 토큰 클래스명 포함)를 반환하는데, 다른 인증 엔드포인트의
+    `{'detail': ...}` 형식과 맞추고 구현 세부 노출을 없애기 위해 401 +
+    `{'detail': 한국어 메시지}`로 통일한다. `refresh` 필드 누락은 토큰
+    파싱 이전의 시리얼라이저 검증 오류라 그대로 400으로 나간다.
+    """
+
+    serializer_class = TokenRefreshSerializer
+
+    def post(self, request, *args, **kwargs):
+        try:
+            return super().post(request, *args, **kwargs)
+        except (InvalidToken, TokenError):
+            return Response(
+                {'detail': '세션이 만료되었습니다. 다시 로그인해 주세요.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+
+class LogoutView(APIView):
+    """
+    로그아웃 — body의 refresh token을 blacklist해 서버에서 실제로 무효화한다.
+    이후 그 refresh token으로 `/auth/token/refresh/`를 호출하면 401이 된다.
+
+    - **권한 `AllowAny`**: 이미 만료된 access token으로도 로그아웃할 수 있어야
+      하고(access가 죽었다고 refresh를 못 버리면 곤란), body의 refresh token
+      자체가 소유 증명이라 별도 인증을 요구하지 않는다.
+    - **클라이언트 전용이 아니라 서버 blacklist를 택한 이유**: 낙상·무활동
+      응급 상황에서 보호자에게 카메라/GPS 접근을 여는 서비스라, 탈취된 refresh
+      token(기본 수명 1일, rotation 미설정)이 로그아웃 후에도 계속 access
+      token을 찍어낼 수 있으면 위험하다. `token_blacklist` 앱 추가 + `migrate`
+      한 번이면 실제 무효화가 되므로 비용 대비 이득이 크다고 판단했다.
+    - **한계**: blacklist는 refresh/sliding token에만 걸린다. 로그아웃 직전에
+      발급된 access token은 남은 수명(기본 5분)동안 유효하다 — 짧은 수명으로
+      자연 만료를 기대하는 simplejwt의 표준 동작이다.
+    - 이미 만료·무효인 refresh token을 보내도 로그아웃 목적(그 토큰 무효화)은
+      달성된 상태라 205로 통과시킨다(멱등).
+    """
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        serializer = LogoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            RefreshToken(serializer.validated_data['refresh']).blacklist()
+        except TokenError:
+            pass
+        return Response(status=status.HTTP_205_RESET_CONTENT)
 
 
 class SeniorDetailView(generics.RetrieveUpdateAPIView):
