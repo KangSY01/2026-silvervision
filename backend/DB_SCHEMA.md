@@ -226,9 +226,12 @@
 - `GET /senior/{id}/ranking/` → `ranking_snapshot` (2026-09-02 구현). 권한 `IsSeniorSelf`. 응답은 `{"national": <스냅샷>|null, "regional": <스냅샷>|null}` — scope별 최신(`snapshot_date` 기준) 스냅샷을 나란히 담는다. 완료 세션이 없는 신규 시니어는 두 scope 모두 `null` + `200`("순위 없음"은 정상 상태라 404가 아님).
   - **순위 산정 방식** (배치 프로세스 부재에 대한 결정): 정식 스케줄러(Celery/cron) 대신, `POST/PATCH`로 세션이 완료 처리(`exercise_session.completion_rate`가 채워짐)될 때 `api/gamification.py`의 `recalculate_rankings()`가 **그 날짜의 national/regional 스냅샷을 전량 재계산해 upsert**한다. `score` = "그 달 1일부터 오늘까지 완료된 세션 수"(AI 경계와 무관한 단순 row 집계). `rank_position` = 같은 `snapshot_date`·`rank_scope` 내 `score` 내림차순 표준 경쟁 순위(동점 동순위: 1,2,2,4). `regional`은 `senior.address` 전체 문자열이 아니라 거기서 뽑은 **"시/도 + 구/군" 접두어**(`api/gamification.py`의 `region_key()`, 예: `"서울특별시 강남구 테헤란로 123"` → `"서울특별시 강남구"`)가 같은 시니어끼리 묶는다. 순위 풀은 해당 월에 완료 세션이 1건 이상인 시니어. `address`가 자유 입력 필드라 접두어 파싱이 완벽하지 않다 — 표기 흔들림(`서울시`/`서울특별시`), 시·도 생략, 상세주소를 앞에 쓴 경우, 오타·영문 주소는 잘못 묶이거나 단독 그룹이 된다. 정확한 그룹핑이 필요하면 행정구역 코드 컬럼을 추가해야 한다. 순위 대상 시니어 수가 적은 프로젝트 규모라 매 완료마다 전량 재계산해도 부담이 없다고 판단했고, 커지면 `python manage.py recalculate_rankings`(신규 management command)로 배치 전환 가능하다.
 - `Senior.fruit_count` 증감(운동 보상) — `exercise_session` 완료(`completion_rate` 기록) 시 `api/gamification.py`의 `recompute_fruit_count()`가 트리거된다. 세션 1회 완료당 열매 1개(`FRUIT_PER_SESSION`), **하루 최대 6개**(`FRUIT_DAILY_CAP`, 프론트 "6개 중 N개 획득" 표현에 맞춤). 단순 +1이 아니라 완료 세션 기록으로부터 `fruit_count`를 전량 재계산(일자별 `min(완료 수, 6)`의 합)하므로 같은 세션을 다시 PATCH해도 이중 지급되지 않는다.
+- `GET·POST /senior/{id}/activity-log/` → `activity_log` (2026-09-02 구현). 권한 `IsSeniorSelf`. `senior`는 URL에서 강제 주입(read-only), `logged_at`은 `auto_now_add`.
+  - **`activity_type`은 choices로 잠그지 않고 `CharField` 자유 문자열 유지**. 이벤트 종류(screen_on/off, touch, accelerometer, …)는 기기/AI 파트가 정하고 센서 추가에 따라 늘 수 있어(AI 모델 경계), 백엔드 enum으로 고정하면 값이 늘 때마다 마이그레이션·배포가 필요해진다. 빈 문자열만 거부.
+  - **POST는 단건(JSON object)·여러 건(JSON array) 모두 수용** — 기기가 활동 이벤트를 짧은 주기로 모아 보내는 센서 로그 특성상 `pose_feedback`과 같은 `bulk_create` 패턴을 재사용. `bulk_create`라 MySQL에서는 응답의 `log_id`가 비어 있을 수 있다(fire-and-forget 용도라 무방).
+  - **GET은 최신순, 기본 100건·최대 500건으로 제한.** 무활동 판정은 "최근 일정 시간 안에 로그가 있는지"만 보므로 전체 이력이 불필요하고, 무한 반환하면 응답이 비대해진다. `?limit=<n>`(건수), `?since=<ISO8601>`(그 시각 이후)로 조절.
 
 **구현 예정**
 - `/senior/{id}/ability-log/` → `physical_ability_log`
-- `/senior/{id}/activity-log/` → `activity_log`
 
 이번 재개발은 이 문서(v2 스키마)를 기준으로 처음부터 다시 구현하며, 위 API 목록은 우선순위 참고용이지 기존 코드가 남아있다는 의미는 아니다 (완전히 새로 작성).

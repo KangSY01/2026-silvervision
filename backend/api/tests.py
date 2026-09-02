@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
+    ActivityLog,
     CameraAccessGrant,
     EmergencyEvent,
     EmergencyNotification,
@@ -471,3 +472,142 @@ class GamificationTests(ApiTestBase):
             f'/api/v1/senior/{self.senior.senior_id}/ranking/'
         )
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class ActivityLogTests(ApiTestBase):
+    def setUp(self):
+        self.senior = self.make_senior('senior1', 'BARCODE-1')
+        self.other = self.make_senior('senior2', 'BARCODE-2')
+        self.url = f'/api/v1/senior/{self.senior.senior_id}/activity-log/'
+
+    def _backdate(self, log, **delta):
+        ActivityLog.objects.filter(pk=log.pk).update(
+            logged_at=timezone.now() - timedelta(**delta)
+        )
+
+    def test_post_single_saves(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.post(
+            self.url, {'activity_type': 'screen_on'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        log = ActivityLog.objects.get()
+        self.assertEqual(log.activity_type, 'screen_on')
+        self.assertEqual(log.senior_id, self.senior.senior_id)
+        self.assertIsNotNone(log.logged_at)
+
+    def test_post_bulk_saves_all(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.post(
+            self.url,
+            [
+                {'activity_type': 'screen_on'},
+                {'activity_type': 'touch'},
+                {'activity_type': 'accelerometer'},
+            ],
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(ActivityLog.objects.filter(senior=self.senior).count(), 3)
+
+    def test_post_ignores_body_senior_and_logged_at(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.post(
+            self.url,
+            {
+                'activity_type': 'touch',
+                'senior': self.other.senior_id,
+                'logged_at': '2000-01-01T00:00:00Z',
+            },
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        log = ActivityLog.objects.get()
+        self.assertEqual(log.senior_id, self.senior.senior_id)
+        self.assertGreater(log.logged_at.year, 2000)
+
+    def test_blank_activity_type_rejected(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.post(
+            self.url, {'activity_type': ''}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_get_returns_own_logs_newest_first(self):
+        old = ActivityLog.objects.create(
+            senior=self.senior, activity_type='screen_off',
+        )
+        self._backdate(old, hours=2)
+        ActivityLog.objects.create(senior=self.senior, activity_type='screen_on')
+        ActivityLog.objects.create(
+            senior=self.other, activity_type='touch',
+        )
+
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 2)
+        self.assertEqual(res.data[0]['activity_type'], 'screen_on')
+        self.assertEqual(res.data[1]['activity_type'], 'screen_off')
+
+    def test_get_limit_param_caps_results(self):
+        for _ in range(5):
+            ActivityLog.objects.create(
+                senior=self.senior, activity_type='touch',
+            )
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.get(self.url, {'limit': 2})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 2)
+
+    def test_get_since_param_filters_by_time(self):
+        recent = ActivityLog.objects.create(
+            senior=self.senior, activity_type='touch',
+        )
+        self._backdate(recent, minutes=10)
+        old = ActivityLog.objects.create(
+            senior=self.senior, activity_type='screen_off',
+        )
+        self._backdate(old, hours=3)
+
+        since = (timezone.now() - timedelta(hours=1)).isoformat()
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.get(self.url, {'since': since})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]['activity_type'], 'touch')
+
+    def test_get_invalid_limit_returns_400(self):
+        self.auth('senior', self.senior.senior_id)
+        self.assertEqual(
+            self.client.get(self.url, {'limit': 'abc'}).status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertEqual(
+            self.client.get(self.url, {'limit': 0}).status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_get_invalid_since_returns_400(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.get(self.url, {'since': 'not-a-date'})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_other_senior_forbidden(self):
+        self.auth('senior', self.other.senior_id)
+        self.assertEqual(
+            self.client.get(self.url).status_code, status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            self.client.post(
+                self.url, {'activity_type': 'touch'}, format='json',
+            ).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_requires_auth(self):
+        self.logout()
+        self.assertEqual(
+            self.client.get(self.url).status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )

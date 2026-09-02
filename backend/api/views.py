@@ -2,13 +2,16 @@ from django.db import IntegrityError
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import (
+    ActivityLog,
     CameraAccessGrant,
     EmergencyEvent,
     EmergencyNotification,
@@ -22,6 +25,7 @@ from .models import (
 from .gamification import latest_ranking, recalculate_rankings, recompute_fruit_count
 from .permissions import IsGuardianSelf, IsSenior, IsSeniorOrGuardian, IsSeniorSelf
 from .serializers import (
+    ActivityLogSerializer,
     AlreadyRegistered,
     CameraAccessGrantSerializer,
     EmergencyEventDetailSerializer,
@@ -400,6 +404,81 @@ class SessionFeedbackCreateView(generics.CreateAPIView):
         serializer = self.get_serializer(data=payload, many=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ActivityLogListCreateView(generics.ListCreateAPIView):
+    """
+    기기 활동 로그(무활동 감지용) 저장/조회.
+
+    GET  - 이 시니어의 로그를 최신순으로 반환한다. 무활동 판정은 결국
+           "최근 일정 시간 안에 로그가 있는지"만 보는 용도라 전체 이력이
+           필요 없고, 로그가 계속 쌓이면 응답이 비대해진다. 그래서 파라미터가
+           없어도 기본 100건(최대 500건)으로 자르고, `?since=<ISO8601>`로
+           기간을, `?limit=<n>`으로 건수를 조절한다. 다른 목록 API와
+           마찬가지로 페이지네이션 래퍼 없이 평면 배열로 응답한다.
+    POST - 로그 저장. 기기가 화면 On/Off·터치·가속도 이벤트를 짧은 주기로
+           모아 보내는 특성상 단건(JSON object)과 여러 건(JSON array)을
+           모두 받는다(SessionFeedbackCreateView와 동일한 bulk 패턴).
+           senior는 URL의 senior_id 본인으로 강제 주입하고 activity_type만
+           신뢰한다(logged_at은 auto_now_add라 서버가 채운다).
+
+    senior_id 자체가 본인이 아니면 IsSeniorSelf가 403으로 먼저 막고,
+    get_queryset도 senior_id로 필터링해 타인 로그가 섞이지 않게 한다.
+    bulk_create라 MySQL에서는 POST 응답의 log_id가 채워지지 않을 수 있다
+    (기기가 로그를 fire-and-forget로 보내는 용도라 ID 회신이 불필요).
+    """
+    permission_classes = (IsSeniorSelf,)
+    serializer_class = ActivityLogSerializer
+
+    DEFAULT_LIMIT = 100
+    MAX_LIMIT = 500
+
+    def _limit(self):
+        raw = self.request.query_params.get('limit')
+        if raw is None:
+            return self.DEFAULT_LIMIT
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise ValidationError({'limit': '정수여야 합니다.'})
+        if value < 1:
+            raise ValidationError({'limit': '1 이상이어야 합니다.'})
+        return min(value, self.MAX_LIMIT)
+
+    def _since(self):
+        raw = self.request.query_params.get('since')
+        if raw is None:
+            return None
+        try:
+            parsed = parse_datetime(raw)
+        except ValueError:
+            parsed = None
+        if parsed is None:
+            raise ValidationError(
+                {'since': 'ISO 8601 형식이어야 합니다 (예: 2026-09-02T10:00:00Z).'}
+            )
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed)
+        return parsed
+
+    def get_queryset(self):
+        queryset = ActivityLog.objects.filter(
+            senior_id=self.kwargs['senior_id']
+        ).order_by('-logged_at')
+        since = self._since()
+        if since is not None:
+            queryset = queryset.filter(logged_at__gte=since)
+        return queryset[:self._limit()]
+
+    def create(self, request, *args, **kwargs):
+        items = request.data if isinstance(request.data, list) else [request.data]
+        if not items or not all(isinstance(item, dict) for item in items):
+            raise ValidationError('각 항목은 JSON 객체여야 하며 최소 1건이 필요합니다.')
+        serializer = self.get_serializer(data=items, many=True)
+        serializer.is_valid(raise_exception=True)
+        # IsSeniorSelf 통과 = request.user가 URL senior_id 본인.
+        serializer.save(senior=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 

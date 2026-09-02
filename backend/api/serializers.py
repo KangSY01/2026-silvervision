@@ -469,11 +469,33 @@ class EmergencyEventDetailSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ActivityLogListSerializer(serializers.ListSerializer):
+    """기기가 화면 On/Off·터치·가속도 이벤트를 짧은 주기로 모아 보내는
+    특성상 여러 건을 한 번에 저장한다(PoseFeedbackListSerializer와 동일한
+    bulk_create 패턴)."""
+    def create(self, validated_data):
+        instances = [ActivityLog(**item) for item in validated_data]
+        return ActivityLog.objects.bulk_create(instances)
+
+
 class ActivityLogSerializer(serializers.ModelSerializer):
+    """
+    activity_type은 모델의 CharField(max_length=100) 자유 문자열을 그대로
+    노출한다 - choices로 잠그지 않는다. 어떤 이벤트 종류(screen_on/off,
+    touch, accelerometer, …)가 오는지는 기기/AI 파트가 정하고 센서가
+    추가될 때마다 늘 수 있어(AGENTS.md 3장 'AI 모델 경계'), 백엔드에서
+    enum으로 고정하면 값이 늘 때마다 마이그레이션·배포가 필요해진다.
+    빈 문자열은 CharField 기본 검증(allow_blank=False)이 400으로 거부한다.
+
+    senior는 read-only - 뷰에서 URL의 senior_id 본인(request.user)으로
+    강제 주입한다(다른 시니어 명의로 로그를 남기는 IDOR 방지, views.py의
+    'URL·토큰이 body보다 우선' 규칙). logged_at은 auto_now_add.
+    """
     class Meta:
         model = ActivityLog
         fields = ('log_id', 'senior', 'activity_type', 'logged_at')
-        read_only_fields = ('log_id', 'logged_at')
+        read_only_fields = ('log_id', 'senior', 'logged_at')
+        list_serializer_class = ActivityLogListSerializer
 
 
 class RankingSnapshotSerializer(serializers.ModelSerializer):

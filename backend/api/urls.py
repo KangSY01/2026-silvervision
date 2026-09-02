@@ -76,6 +76,11 @@ urlpatterns = [
         views.SessionFeedbackCreateView.as_view(),
         name='senior-session-feedback',
     ),
+    path(
+        'senior/<int:senior_id>/activity-log/',
+        views.ActivityLogListCreateView.as_view(),
+        name='senior-activity-log',
+    ),
 
     # 응급 관련 URL
     path(
