@@ -209,20 +209,23 @@
 
 ## 참고 — API 연동 관련 메모
 
-중간보고서 5.2절 기준으로, 아래 엔드포인트가 이 스키마와 직접 연결된다. (2026-07-17 기준 실제 `api/urls.py` 라우팅과 대조해 갱신)
+중간보고서 5.2절 기준으로, 아래 엔드포인트가 이 스키마와 직접 연결된다. (2026-09-02 기준 실제 `api/urls.py` 라우팅과 대조해 갱신)
 
 **구현 완료**
 - `/auth/senior/register/`, `/auth/senior/login/` → `senior`
 - `/auth/guardian/register/`, `/auth/guardian/login/` → `guardian`
 - `/senior/{id}/`, `/guardian/{id}/` (조회/수정) → `senior`, `guardian`
+- `/guardian/{id}/seniors/` (GET 목록 / POST 등록), `.../seniors/{senior_id}/` (DELETE 해제) → `guardian_senior_map`
+  - (2026-09-02 구현) POST body는 `registered_via` + (`login_id` | `barcode_code`)이며, 두 값 모두 `senior` 테이블에 UNIQUE라 **서버가 senior를 조회**한다 (클라이언트가 senior_id를 직접 보내지 않음 → `registered_via`가 실제 조회 경로를 정확히 반영). `(guardian, senior)` UNIQUE 위반(중복 등록)은 **409**, 존재하지 않는 식별자는 **404**. 승인 절차는 스키마·화면에 없어 등록 즉시 연결된다.
 - `/senior/{id}/missions/`, `.../missions/{mission_id}/` → `exercise_mission`
 - `/senior/{id}/sessions/`, `.../sessions/{session_id}/`, `.../feedback/` → `exercise_session`, `pose_feedback`
+  - (2026-09-02 추가) 세션 `GET` 목록/상세 구현. 상세 응답은 연결된 `pose_feedback`을 `pose_feedbacks`로 nested 포함(목록에는 미포함 — 세션 밖에서 `pose_feedback`을 조회할 경로가 없어 상세에 인라인). 권한은 `IsSeniorSelf`.
 - `/emergency/`, `/emergency/{event_id}/`, `.../notify/`, `.../camera-grant/` (POST/DELETE) → `emergency_event`, `emergency_notification`, `camera_access_grant`
+  - (2026-09-02 추가) 이벤트 `GET` 목록/상세 구현. 목록/상세 모두 `_visible_emergency_events`(시니어 본인 소유 또는 `guardian_senior_map`으로 연결된 보호자에게 보이는 것)로 필터 — 다른 시니어 소속 `event_id` 접근 시 404. 상세 응답은 `emergency_notification`(`notifications`), `camera_access_grant`(`camera_grants`)를 nested 포함(둘 다 독립 조회 엔드포인트 없음). 생성은 시니어 본인만, 목록/상세는 시니어·보호자 모두.
 - `/exercises/`, `/exercises/{id}/` → `exercise` (2026-07-24: 문서에는 "구현 완료"로 표기돼 있었으나 실제 `views.py`/`urls.py`에는 라우팅·뷰가 없던 상태였고, 이번에 실제로 구현해 문서와 코드를 일치시킴)
 
 **구현 예정**
 - `/senior/{id}/ranking/` → `ranking_snapshot`
-- `/guardian/{id}/seniors/` (조회/등록/해제) → `guardian_senior_map`
 - `/senior/{id}/ability-log/` → `physical_ability_log`
 - `/senior/{id}/activity-log/` → `activity_log`
 

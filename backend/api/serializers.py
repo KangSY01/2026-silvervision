@@ -2,7 +2,8 @@ import uuid
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils import timezone
-from rest_framework import serializers
+from rest_framework import serializers, status
+from rest_framework.exceptions import APIException, NotFound
 
 from .models import (
     ActivityLog,
@@ -13,11 +14,25 @@ from .models import (
     ExerciseMission,
     ExerciseSession,
     Guardian,
+    GuardianSeniorMap,
     PhysicalAbilityLog,
     PoseFeedback,
     RankingSnapshot,
     Senior,
 )
+
+
+class AlreadyRegistered(APIException):
+    """
+    unique_together(guardian, senior) 위반(이미 등록된 피보호자를 다시
+    등록 시도) 시 반환한다. 요청 형식·식별자 자체는 유효하고 리소스가
+    이미 존재하는 상태 충돌이라 400(입력을 고쳐 재시도)이 아니라 409를
+    택했다 - 클라이언트가 "이미 등록됨"과 "잘못된 바코드"를 상태 코드로
+    구분해 다른 안내를 띄울 수 있다.
+    """
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = '이미 등록된 피보호자입니다.'
+    default_code = 'already_registered'
 
 
 def _generate_barcode_code():
@@ -95,6 +110,78 @@ class SeniorLoginSerializer(serializers.Serializer):
 class GuardianLoginSerializer(serializers.Serializer):
     login_id = serializers.CharField()
     password = serializers.CharField(write_only=True)
+
+
+class MappedSeniorSerializer(serializers.ModelSerializer):
+    """
+    보호자-피보호자 매핑 목록에서 각 피보호자를 식별할 최소 정보만 노출한다.
+    보호자는 `/senior/{id}/`(IsSeniorSelf)로 피보호자 프로필을 받을 수 없어
+    이 요약이 보호자 쪽에서 피보호자 정보를 얻는 유일한 경로지만, 질환·
+    복용약 같은 민감 정보는 목록 용도에 불필요하므로 제외한다.
+    """
+    class Meta:
+        model = Senior
+        fields = ('senior_id', 'login_id', 'name', 'phone', 'mobility_level')
+        read_only_fields = fields
+
+
+class GuardianSeniorMapSerializer(serializers.ModelSerializer):
+    """매핑 조회용 - senior는 위 요약 시리얼라이저로 중첩한다."""
+    senior = MappedSeniorSerializer(read_only=True)
+
+    class Meta:
+        model = GuardianSeniorMap
+        fields = ('map_id', 'guardian', 'senior', 'registered_via', 'created_at')
+        read_only_fields = fields
+
+
+class GuardianSeniorMapCreateSerializer(serializers.Serializer):
+    """
+    등록 방식(registered_via)에 따라 **서버가** 피보호자를 조회한다.
+    - id_search: `login_id`를 받아 `senior.login_id`로 조회
+    - barcode:   `barcode_code`를 받아 `senior.barcode_code`로 조회
+
+    두 값 모두 senior 테이블에 UNIQUE라 서버 조회가 모호하지 않고,
+    클라이언트가 이미 조회한 senior_id를 그대로 신뢰하는 방식과 달리
+    `registered_via`를 서버가 실제 조회 경로로 확정해 채울 수 있어 감사
+    정보가 정확하다. (승인 절차는 스키마·화면에 없어 등록 즉시 연결된다.)
+    """
+    registered_via = serializers.ChoiceField(
+        choices=GuardianSeniorMap.RegisteredVia.choices,
+    )
+    login_id = serializers.CharField(required=False)
+    barcode_code = serializers.CharField(required=False)
+
+    def validate(self, attrs):
+        via = attrs['registered_via']
+        Via = GuardianSeniorMap.RegisteredVia
+        field = 'login_id' if via == Via.ID_SEARCH else 'barcode_code'
+        value = attrs.get(field)
+        if not value:
+            raise serializers.ValidationError(
+                {field: f'registered_via가 {via}일 때 {field}는 필수입니다.'}
+            )
+
+        try:
+            senior = Senior.objects.get(**{field: value})
+        except Senior.DoesNotExist:
+            raise NotFound('해당 피보호자를 찾을 수 없습니다.')
+
+        guardian = self.context['guardian']
+        if GuardianSeniorMap.objects.filter(
+            guardian=guardian, senior=senior
+        ).exists():
+            raise AlreadyRegistered()
+
+        attrs['senior'] = senior
+        return attrs
+
+    def create(self, validated_data):
+        return GuardianSeniorMap.objects.create(
+            guardian=self.context['guardian'],
+            senior=validated_data['senior'],
+            registered_via=validated_data['registered_via'],
+        )
 
 
 class ExerciseSerializer(serializers.ModelSerializer):
@@ -214,6 +301,26 @@ class PoseFeedbackSerializer(serializers.ModelSerializer):
         fields = ('feedback_id', 'session', 'joint_name', 'deviation')
         read_only_fields = ('feedback_id',)
         list_serializer_class = PoseFeedbackListSerializer
+
+
+class ExerciseSessionDetailSerializer(serializers.ModelSerializer):
+    """
+    세션 단건 조회용. pose_feedback은 이 세션 밖에서 조회할 경로가 없어
+    (독립 GET 엔드포인트 없음) 상세 응답에 nested로 내려준다. 세션당 관절
+    몇 개짜리 소량이라 상세에서 인라인해도 부담이 없다 - 목록
+    (ExerciseSessionSerializer)에는 넣지 않는다.
+    """
+    pose_feedbacks = PoseFeedbackSerializer(
+        many=True, read_only=True, source='posefeedback_set',
+    )
+
+    class Meta:
+        model = ExerciseSession
+        fields = (
+            'session_id', 'mission', 'senior', 'exercise',
+            'completion_rate', 'accuracy_avg', 'created_at', 'pose_feedbacks',
+        )
+        read_only_fields = fields
 
 
 class PhysicalAbilityLogSerializer(serializers.ModelSerializer):
@@ -337,6 +444,29 @@ class CameraAccessGrantSerializer(serializers.ModelSerializer):
                 'expires_at은 현재 시각 이후여야 합니다.'
             )
         return value
+
+
+class EmergencyEventDetailSerializer(serializers.ModelSerializer):
+    """
+    이벤트 단건 조회용. 알림 발송 이력(emergency_notification)과 카메라
+    접근 권한 이력(camera_access_grant)은 독립 조회 엔드포인트가 없어
+    이벤트 상세에 nested로 포함한다 - 목록(EmergencyEventSerializer)에는
+    넣지 않는다.
+    """
+    notifications = EmergencyNotificationSerializer(
+        many=True, read_only=True, source='emergencynotification_set',
+    )
+    camera_grants = CameraAccessGrantSerializer(
+        many=True, read_only=True, source='cameraaccessgrant_set',
+    )
+
+    class Meta:
+        model = EmergencyEvent
+        fields = (
+            'event_id', 'senior', 'event_type', 'detection_source',
+            'status', 'created_at', 'notifications', 'camera_grants',
+        )
+        read_only_fields = fields
 
 
 class ActivityLogSerializer(serializers.ModelSerializer):
