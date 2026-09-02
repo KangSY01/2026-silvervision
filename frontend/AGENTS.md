@@ -17,6 +17,8 @@ Expo HAS CHANGED — 코드를 작성하기 전에 반드시 정확한 버전별
 - `expo-linear-gradient` — 그라디언트 배경/버튼 (Tailwind의 `bg-gradient-*` 재현용)
 - 웹 프리뷰용: `react-dom`, `react-native-web`, `@expo/metro-runtime` — `npx expo start --web`으로 크롬에서 확인 가능 (네이티브 전용 API를 쓰는 화면은 웹에서 다르게 보일 수 있음)
 - `@react-navigation/native` + `@react-navigation/native-stack`, `react-native-screens`, `react-native-safe-area-context` — 네비게이션 도입 완료 (8장 참고)
+- `@react-native-async-storage/async-storage` — JWT access/refresh 토큰 저장 (`src/api/client.ts`)
+- 백엔드 통신은 `fetch` 기반 자체 클라이언트(`src/api/client.ts`) — 별도 HTTP 라이브러리 미도입
 - 아직 미도입: `moti`(애니메이션, 필요 시 도입 검토)
 
 ## 4. 프로젝트 구조
@@ -31,6 +33,7 @@ frontend/
       senior/                    # 시니어(피보호자) 전용 화면
       guardian/                  # 보호자 전용 화면
     navigation/types.ts          # RootStackParamList — 화면별 params 타입 정의 (8장 참고)
+    api/client.ts                # 공통 API 클라이언트 (fetch 래퍼, JWT 저장/첨부, ApiError, 응답 타입)
     context/AppStateContext.tsx  # userProfile, fruitsCollected 등 전역 상태 공유 (8장 참고)
     components/TabScreenLayout.tsx  # 홈/운동하기/개인정보 공통 헤더 + 하단 탭바 레이아웃
     theme/theme.ts                # colors / fontSizes / fontWeights / spacing / radius / MIN_TOUCH_TARGET 토큰
@@ -88,7 +91,11 @@ frontend/
 ## 7. 다음 단계
 
 - 시니어 화면 8종 + 보호자 화면 9종 포팅 및 네비게이션(탭 전환, 뒤로가기 스택, 화면 간 실제 연결) 전체 완료됨
-- 백엔드 API 연동으로 목업 데이터(`AppStateContext`의 `DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`/`DEFAULT_SENIORS`/`DEFAULT_ALERTS` 등) 교체
+- **백엔드 API 연동 — 화면 단위 진행 중**:
+  - 공통 클라이언트 `src/api/client.ts` 구현 완료: `apiClient.{get,post,patch,delete}`, JWT access/refresh를 `AsyncStorage`에 저장·자동 첨부, `ApiError`/`getApiErrorMessage`, 인증 요청 401 시 세션 클리어(refresh 재시도 없음 — 백엔드에 재발급 엔드포인트 없음). 응답 타입 인터페이스도 이 파일에 모으고 각 인터페이스 주석에 대응 백엔드 시리얼라이저를 명시.
+  - 연동 완료 3개: `LoginScreen`(시니어 로그인+프로필 조회), `GuardianLoginScreen`(보호자 로그인+프로필 조회), `ExerciseSelectScreen`(`GET /exercises/`).
+  - 나머지 14개 화면은 `AppStateContext` 목업(`DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`/`DEFAULT_SENIORS`/`DEFAULT_ALERTS` 등)을 그대로 사용. API 스펙은 `backend/AGENTS.md` 5장 표 또는 실제 `backend/api/serializers.py`·`views.py`에서 확인하고, 불명확하면 임의 가정 대신 확인.
+  - 백엔드 enum → 화면 표시 라벨 변환은 `Record<enum, label>` 타입으로 만들어 enum 확장 시 컴파일 타임에 누락이 드러나게 한다(`ExerciseSelectScreen`의 `DIFFICULTY_LABELS` 참고).
 - 음성 인식 기능 설계 확정 후 `VoiceAssistantModal` 연결
 
 ## 8. 네비게이션 및 상태 관리
@@ -123,4 +130,4 @@ Entry (진입)
 
 두 경우 모두 `useRoute<RouteProp<RootStackParamList, '화면명'>>()`으로 타입을 좁혀서 사용한다.
 
-**전역 상태 (`AppStateContext`)**: [src/context/AppStateContext.tsx](src/context/AppStateContext.tsx)는 `App.tsx`에서 `NavigationContainer` 바깥, `SafeAreaProvider` 안쪽에 `AppStateProvider`로 마운트되어 화면 간 공유가 필요한 상태(`userProfile`, `guardianProfile`, `seniors`, `alerts`, `fruitsCollected`)를 보관한다. 화면 컴포넌트에서는 `useAppState()` 훅으로 접근한다(`AppStateProvider` 밖에서 호출하면 에러 발생). 현재 값은 백엔드 연동 전 목업(`DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`/`DEFAULT_SENIORS`/`DEFAULT_ALERTS` 등)이며, params로 전달하기엔 여러 화면에서 공유해야 하는 값만 여기 둔다 — 화면 간 1회성 전달 데이터는 `RootStackParamList` params를 우선 사용한다.
+**전역 상태 (`AppStateContext`)**: [src/context/AppStateContext.tsx](src/context/AppStateContext.tsx)는 `App.tsx`에서 `NavigationContainer` 바깥, `SafeAreaProvider` 안쪽에 `AppStateProvider`로 마운트되어 화면 간 공유가 필요한 상태(`userProfile`, `guardianProfile`, `seniors`, `alerts`, `fruitsCollected`)를 보관한다. 화면 컴포넌트에서는 `useAppState()` 훅으로 접근한다(`AppStateProvider` 밖에서 호출하면 에러 발생). 값은 대부분 아직 목업(`DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`/`DEFAULT_SENIORS`/`DEFAULT_ALERTS` 등)이다 — 로그인 화면 2개와 `ExerciseSelectScreen`만 실제 API 응답을 쓰며(7장), 이들도 로그인 세션 자체는 `src/api/client.ts`가 `AsyncStorage`로 관리하고 `AppStateContext`에는 화면 표시용 프로필만 반영한다. params로 전달하기엔 여러 화면에서 공유해야 하는 값만 여기 둔다 — 화면 간 1회성 전달 데이터는 `RootStackParamList` params를 우선 사용한다.
