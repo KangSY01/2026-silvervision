@@ -60,6 +60,7 @@
 | | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` — GET은 `pose_feedback` nested / PATCH는 `completion_rate`·`accuracy_avg`(완료 시 fruit/ranking 갱신 트리거) | `IsSeniorSelf` |
 | | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` — bulk 저장 | `IsSeniorSelf` |
 | | GET·POST | `senior/{senior_id}/activity-log/` — 기기 활동 로그. GET 최신순(기본 100·최대 500건, `?limit`/`?since`), POST 단건·bulk | `IsSeniorSelf` |
+| | GET·POST | `senior/{senior_id}/ability-log/` — 장기 신체 능력(일별). GET `logged_date` 오름차순 전체, POST는 `(senior, logged_date)` upsert(신규 201 / 갱신 200) | `IsSeniorSelf` |
 | **응급** | GET·POST | `emergency/` — GET은 `IsSeniorOrGuardian` + `_visible_emergency_events`, POST는 `IsSenior`(시니어 본인만 생성) | (method별) |
 | | GET·PATCH | `emergency/{event_id}/` — GET은 `emergency_notification`·`camera_access_grant` nested / PATCH는 status 전이(`notified` 제외) | `IsSeniorOrGuardian` + `_visible_emergency_events` |
 | | POST | `emergency/{event_id}/notify/` — 알림 row 생성 (FCM 실발송은 범위 밖) | `IsSeniorOrGuardian` |
@@ -71,18 +72,19 @@
 
 ### 시리얼라이저
 
-`api/serializers.py`에 13개 테이블 전 영역 작성 완료. 액션별로 분리돼 있다(예: `ExerciseMissionSerializer`/`...CreateSerializer`/`...StatusUpdateSerializer`, `ExerciseSession` start/complete/detail, `EmergencyEvent` 생성/status-update/detail). `RankingSnapshotSerializer`는 `SeniorRankingView`가 scope별로 사용한다(전국/지역을 한 응답에 묶는 건 views.py 몫). `ActivityLogSerializer`는 `senior` read-only + `ActivityLogListSerializer`(bulk_create) 구성으로 `ActivityLogListCreateView`가 쓴다. `PhysicalAbilityLogSerializer`는 작성돼 있으나 대응 뷰·URL이 아직 없다.
+`api/serializers.py`에 13개 테이블 전 영역 작성 완료. 액션별로 분리돼 있다(예: `ExerciseMissionSerializer`/`...CreateSerializer`/`...StatusUpdateSerializer`, `ExerciseSession` start/complete/detail, `EmergencyEvent` 생성/status-update/detail). `RankingSnapshotSerializer`는 `SeniorRankingView`가 scope별로 사용한다(전국/지역을 한 응답에 묶는 건 views.py 몫). `ActivityLogSerializer`는 `senior` read-only + `ActivityLogListSerializer`(bulk_create) 구성으로 `ActivityLogListCreateView`가 쓴다. `PhysicalAbilityLogSerializer`는 `senior` read-only + `logged_date` optional + 점수 음수 거부 구성으로 `PhysicalAbilityLogListCreateView`가 조회·upsert 공용으로 쓴다. 13개 테이블 모두 대응 뷰·URL이 존재한다.
 
 ### 미구현 (구현 예정)
 
 | 섹션 | 항목 |
 |---|---|
 | 인증 | 토큰 refresh(재발급), 로그아웃, 비밀번호 변경/재설정. 매핑 등록 전 시니어 검색 API 없음 |
-| 기록 | `senior/{id}/ability-log/` → `physical_ability_log` (시리얼라이저만 존재) |
+
+스키마 13개 테이블에 직결되는 CRUD 엔드포인트는 전부 구현됐다. 남은 건 인증 부가 기능(위 표)뿐이다.
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET + 게임화(fruit_count·ranking) + 활동 로그 테스트 47건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 테스트 55건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 

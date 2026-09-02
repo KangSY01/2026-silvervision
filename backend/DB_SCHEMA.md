@@ -230,8 +230,11 @@
   - **`activity_type`은 choices로 잠그지 않고 `CharField` 자유 문자열 유지**. 이벤트 종류(screen_on/off, touch, accelerometer, …)는 기기/AI 파트가 정하고 센서 추가에 따라 늘 수 있어(AI 모델 경계), 백엔드 enum으로 고정하면 값이 늘 때마다 마이그레이션·배포가 필요해진다. 빈 문자열만 거부.
   - **POST는 단건(JSON object)·여러 건(JSON array) 모두 수용** — 기기가 활동 이벤트를 짧은 주기로 모아 보내는 센서 로그 특성상 `pose_feedback`과 같은 `bulk_create` 패턴을 재사용. `bulk_create`라 MySQL에서는 응답의 `log_id`가 비어 있을 수 있다(fire-and-forget 용도라 무방).
   - **GET은 최신순, 기본 100건·최대 500건으로 제한.** 무활동 판정은 "최근 일정 시간 안에 로그가 있는지"만 보므로 전체 이력이 불필요하고, 무한 반환하면 응답이 비대해진다. `?limit=<n>`(건수), `?since=<ISO8601>`(그 시각 이후)로 조절.
+- `GET·POST /senior/{id}/ability-log/` → `physical_ability_log` (2026-09-02 구현). 권한 `IsSeniorSelf`. `senior`는 URL에서 강제 주입(read-only).
+  - **POST는 `(senior, logged_date)` unique 충돌 시 409가 아니라 `update_or_create` upsert** — 새 날짜면 201, 기존 날짜 갱신이면 200. `rom_score`/`completion_score`는 그날 여러 세션을 거치며 마지막 측정값으로 갱신될 수 있는 값이라 재요청을 막는 것보다 덮어쓰는 게 자연스럽다. `logged_date` 생략 시 오늘. 음수 점수는 400(상한은 척도 미확정이라 미설정, `DecimalField`가 999.99까지만 허용).
+  - **GET은 필터 없이 전체 반환, `logged_date` 오름차순.** 하루 최대 1건이라 1년치도 365건뿐이라 activity-log 같은 기간/건수 필터가 불필요하고, 주/월 단위 추이 그래프가 시간 오름차순으로 그려지므로 정렬도 오름차순으로 맞췄다.
 
 **구현 예정**
-- `/senior/{id}/ability-log/` → `physical_ability_log`
+- (스키마 직결 엔드포인트는 없음 — `senior`/`guardian` 프로필 관련 인증 부가 기능만 남음. AGENTS.md 5장 "미구현" 표 참고)
 
 이번 재개발은 이 문서(v2 스키마)를 기준으로 처음부터 다시 구현하며, 위 API 목록은 우선순위 참고용이지 기존 코드가 남아있다는 의미는 아니다 (완전히 새로 작성).

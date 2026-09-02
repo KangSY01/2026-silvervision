@@ -81,6 +81,11 @@ urlpatterns = [
         views.ActivityLogListCreateView.as_view(),
         name='senior-activity-log',
     ),
+    path(
+        'senior/<int:senior_id>/ability-log/',
+        views.PhysicalAbilityLogListCreateView.as_view(),
+        name='senior-ability-log',
+    ),
 
     # 응급 관련 URL
     path(

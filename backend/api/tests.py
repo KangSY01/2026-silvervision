@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.utils import timezone
 from rest_framework import status
@@ -15,6 +15,7 @@ from .models import (
     ExerciseSession,
     Guardian,
     GuardianSeniorMap,
+    PhysicalAbilityLog,
     PoseFeedback,
     RankingSnapshot,
     Senior,
@@ -601,6 +602,125 @@ class ActivityLogTests(ApiTestBase):
         self.assertEqual(
             self.client.post(
                 self.url, {'activity_type': 'touch'}, format='json',
+            ).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_requires_auth(self):
+        self.logout()
+        self.assertEqual(
+            self.client.get(self.url).status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+
+class PhysicalAbilityLogTests(ApiTestBase):
+    def setUp(self):
+        self.senior = self.make_senior('senior1', 'BARCODE-1')
+        self.other = self.make_senior('senior2', 'BARCODE-2')
+        self.url = f'/api/v1/senior/{self.senior.senior_id}/ability-log/'
+
+    def test_post_creates_log_defaulting_to_today(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.post(
+            self.url,
+            {'rom_score': '70.00', 'completion_score': '80.00'},
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        log = PhysicalAbilityLog.objects.get()
+        self.assertEqual(log.senior_id, self.senior.senior_id)
+        self.assertEqual(log.logged_date, timezone.localdate())
+
+    def test_same_day_post_upserts_instead_of_conflict(self):
+        self.auth('senior', self.senior.senior_id)
+        first = self.client.post(
+            self.url,
+            {
+                'rom_score': '70.00', 'completion_score': '80.00',
+                'logged_date': '2026-09-01',
+            },
+            format='json',
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post(
+            self.url,
+            {
+                'rom_score': '75.50', 'completion_score': '82.00',
+                'logged_date': '2026-09-01',
+            },
+            format='json',
+        )
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            PhysicalAbilityLog.objects.filter(senior=self.senior).count(), 1
+        )
+        log = PhysicalAbilityLog.objects.get(senior=self.senior)
+        self.assertEqual(str(log.rom_score), '75.50')
+        self.assertEqual(str(log.completion_score), '82.00')
+
+    def test_get_returns_own_logs_ascending_by_date(self):
+        PhysicalAbilityLog.objects.create(
+            senior=self.senior, rom_score='60.00', completion_score='60.00',
+            logged_date=date(2026, 8, 10),
+        )
+        PhysicalAbilityLog.objects.create(
+            senior=self.senior, rom_score='65.00', completion_score='65.00',
+            logged_date=date(2026, 8, 1),
+        )
+        PhysicalAbilityLog.objects.create(
+            senior=self.other, rom_score='99.00', completion_score='99.00',
+            logged_date=date(2026, 8, 5),
+        )
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [row['logged_date'] for row in res.data],
+            ['2026-08-01', '2026-08-10'],
+        )
+
+    def test_post_ignores_body_senior(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.post(
+            self.url,
+            {
+                'rom_score': '70.00', 'completion_score': '80.00',
+                'senior': self.other.senior_id,
+            },
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            PhysicalAbilityLog.objects.get().senior_id, self.senior.senior_id
+        )
+
+    def test_negative_score_rejected(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.post(
+            self.url,
+            {'rom_score': '-1.00', 'completion_score': '80.00'},
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_score_rejected(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.post(
+            self.url, {'rom_score': '70.00'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_other_senior_forbidden(self):
+        self.auth('senior', self.other.senior_id)
+        self.assertEqual(
+            self.client.get(self.url).status_code, status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            self.client.post(
+                self.url,
+                {'rom_score': '70.00', 'completion_score': '80.00'},
+                format='json',
             ).status_code,
             status.HTTP_403_FORBIDDEN,
         )

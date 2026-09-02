@@ -20,6 +20,7 @@ from .models import (
     ExerciseSession,
     Guardian,
     GuardianSeniorMap,
+    PhysicalAbilityLog,
     Senior,
 )
 from .gamification import latest_ranking, recalculate_rankings, recompute_fruit_count
@@ -45,6 +46,7 @@ from .serializers import (
     GuardianRegisterSerializer,
     GuardianSeniorMapCreateSerializer,
     GuardianSeniorMapSerializer,
+    PhysicalAbilityLogSerializer,
     PoseFeedbackSerializer,
     RankingSnapshotSerializer,
     SeniorLoginSerializer,
@@ -480,6 +482,55 @@ class ActivityLogListCreateView(generics.ListCreateAPIView):
         # IsSeniorSelf 통과 = request.user가 URL senior_id 본인.
         serializer.save(senior=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class PhysicalAbilityLogListCreateView(generics.ListCreateAPIView):
+    """
+    장기 신체 능력 추적(관절 가동범위·완성도)의 일별 기록 저장/조회.
+
+    GET  - 이 시니어의 기록 전체를 logged_date 오름차순으로 반환한다.
+           하루 최대 1건(unique_together)이라 1년치도 365건뿐 - activity-log
+           와 달리 기간/건수 필터를 두지 않는다. 주/월 단위 추이 그래프가
+           시간 오름차순으로 그려지므로 정렬도 오름차순으로 맞춘다(다른 목록
+           API가 최신순인 것과 다른 이유).
+    POST - 일별 점수 upsert. (senior, logged_date) unique 제약이 DB에 걸려
+           있고, rom_score/completion_score는 그날 여러 세션을 거치며 마지막
+           측정값으로 갱신될 수 있는 값이라, 같은 날 재요청을 409로 막기보다
+           update_or_create로 덮어쓴다 - 새로 만들면 201, 기존 날짜를 갱신하면
+           200. logged_date 생략 시 오늘로 채우고, senior는 URL 본인으로 강제
+           주입한다.
+
+    senior_id 자체가 본인이 아니면 IsSeniorSelf가 403으로 먼저 막고,
+    get_queryset도 senior_id로 필터링해 타인 기록이 섞이지 않게 한다.
+    """
+    permission_classes = (IsSeniorSelf,)
+    serializer_class = PhysicalAbilityLogSerializer
+
+    def get_queryset(self):
+        return PhysicalAbilityLog.objects.filter(
+            senior_id=self.kwargs['senior_id']
+        ).order_by('logged_date')
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        logged_date = (
+            serializer.validated_data.get('logged_date') or timezone.localdate()
+        )
+        # IsSeniorSelf 통과 = request.user가 URL senior_id 본인.
+        instance, created = PhysicalAbilityLog.objects.update_or_create(
+            senior=request.user,
+            logged_date=logged_date,
+            defaults={
+                'rom_score': serializer.validated_data['rom_score'],
+                'completion_score': serializer.validated_data['completion_score'],
+            },
+        )
+        output = PhysicalAbilityLogSerializer(instance)
+        return Response(
+            output.data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 def _visible_emergency_events(user):

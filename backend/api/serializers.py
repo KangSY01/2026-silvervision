@@ -324,13 +324,37 @@ class ExerciseSessionDetailSerializer(serializers.ModelSerializer):
 
 
 class PhysicalAbilityLogSerializer(serializers.ModelSerializer):
+    """
+    장기 신체 능력 추적 로그의 조회·기록 공용 시리얼라이저.
+
+    senior는 read-only - 뷰에서 URL의 senior_id 본인(request.user)으로
+    강제 주입한다(다른 시니어 명의로 기록을 남기는 IDOR 방지, views.py의
+    'URL·토큰이 body보다 우선' 규칙).
+
+    logged_date는 optional - 대부분 "오늘 측정값"을 보내므로 생략하면
+    뷰가 오늘로 채우고, 과거 날짜 보정이 필요할 때만 명시한다.
+
+    rom_score/completion_score는 AI 파트가 계산해 보낸 값을 저장만 한다.
+    다만 음수처럼 형태가 명백히 잘못된 입력은 시스템 경계에서 거른다
+    (ExerciseSessionCompleteSerializer와 같은 취지). 점수 상한은 척도가
+    아직 확정 전이라 두지 않는다 - DecimalField(max_digits=5)가 999.99
+    까지만 허용하는 것으로 충분하다고 판단했다.
+    """
+    logged_date = serializers.DateField(required=False)
+    rom_score = serializers.DecimalField(
+        max_digits=5, decimal_places=2, validators=[MinValueValidator(0)],
+    )
+    completion_score = serializers.DecimalField(
+        max_digits=5, decimal_places=2, validators=[MinValueValidator(0)],
+    )
+
     class Meta:
         model = PhysicalAbilityLog
         fields = (
             'log_id', 'senior', 'rom_score', 'completion_score',
             'logged_date',
         )
-        read_only_fields = ('log_id',)
+        read_only_fields = ('log_id', 'senior')
 
 
 class EmergencyEventSerializer(serializers.ModelSerializer):
