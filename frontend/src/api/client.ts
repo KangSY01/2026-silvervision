@@ -115,6 +115,31 @@ export interface ExerciseSessionResponse {
   created_at: string;
 }
 
+/**
+ * backend/api/serializers.py의 MappedSeniorSerializer 형태
+ * (GuardianSeniorMapSerializer.senior에 중첩). 보호자 쪽에서 피보호자를 식별할
+ * 최소 정보만 담기며, 질환·복용약 등 민감 정보는 빠져 있다.
+ */
+export interface MappedSeniorResponse {
+  senior_id: number;
+  login_id: string;
+  name: string;
+  phone: string;
+  mobility_level: SeniorProfileResponse['mobility_level'];
+}
+
+/**
+ * backend/api/serializers.py의 GuardianSeniorMapSerializer 응답 형태
+ * (GET /guardian/{id}/seniors/ 목록의 각 항목, POST /guardian/{id}/seniors/ 생성 응답).
+ */
+export interface GuardianSeniorMapResponse {
+  map_id: number;
+  guardian: number;
+  senior: MappedSeniorResponse;
+  registered_via: 'id_search' | 'barcode';
+  created_at: string;
+}
+
 const STORAGE_KEYS = {
   accessToken: 'silvervision.auth.accessToken',
   refreshToken: 'silvervision.auth.refreshToken',

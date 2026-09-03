@@ -8,9 +8,8 @@ import {
   Search,
   X,
 } from 'lucide-react-native';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +18,14 @@ import {
   View,
 } from 'react-native';
 import {
+  apiClient,
+  ApiError,
+  getApiErrorMessage,
+  getSession,
+  GuardianSeniorMapResponse,
+  MappedSeniorResponse,
+} from '../../api/client';
+import {
   colors,
   fontWeights,
   GUARDIAN_MIN_TOUCH_TARGET,
@@ -26,116 +33,122 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
-import { Senior } from '../../types';
 
-// 아이디 검색 mock 결과 (실제로는 아직 등록되지 않은 새 피보호자 예시)
-const MOCK_SEARCH_RESULTS: Record<string, Senior> = {
-  silver333: {
-    id: 'silver333',
-    name: '정정자',
-    status: 'not_connected',
-    weeklyWorkoutCount: 1,
-    avatarInitials: '정자',
-    phone: '010-3333-4444',
-    address: '서울시 은평구 녹번동 산7번지',
-    diseases: '가벼운 난청',
-  },
-  silver555: {
-    id: 'silver555',
-    name: '최영수',
-    status: 'stretch_completed',
-    weeklyWorkoutCount: 3,
-    avatarInitials: '영수',
-    phone: '010-5555-6666',
-    address: '서울시 성북구 한옥길 12',
-    diseases: '경미한 허리 통증',
-  },
-};
-
-// 바코드 스캔 mock 결과: mock 데이터 구조상 이미 김철수가 등록되어 있으므로,
-// 실제 seniors 배열에 추가하지 않고 데모 성공 화면만 보여준다.
-const MOCK_SCANNED_SENIOR_NAME = '김철수';
+// 백엔드 등록 요청 body. 검색 전용 엔드포인트가 없어 조회+등록을 한 번에
+// 처리하며(POST /guardian/{id}/seniors/), registered_via에 따라 서버가
+// login_id 또는 barcode_code로 피보호자를 조회한다
+// (GuardianSeniorMapCreateSerializer 참고).
+type RegisterPayload =
+  | { registered_via: 'id_search'; login_id: string }
+  | { registered_via: 'barcode'; barcode_code: string };
 
 export default function AddSeniorScreen() {
   const navigation = useNavigation();
+
   const [searchId, setSearchId] = useState('');
-  const [searchedSenior, setSearchedSenior] = useState<Senior | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchSubmitting, setSearchSubmitting] = useState(false);
+
+  const [barcodeCode, setBarcodeCode] = useState('');
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanSubmitting, setScanSubmitting] = useState(false);
+
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
-  const [scanSuccess, setScanSuccess] = useState<string | null>(null);
-  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 두 등록 경로(아이디/바코드)의 공통 성공 상태. 등록된 피보호자 요약(nested)을
+  // 담아 성공 오버레이에 표시한다.
+  const [registeredSenior, setRegisteredSenior] = useState<MappedSeniorResponse | null>(null);
+
+  // 스캔 뷰파인더 레이저 애니메이션은 순수 연출이다. 실제 카메라 기반 QR/바코드
+  // 스캔은 expo-camera 등 신규 네이티브 의존성이 필요하고 비전팀의 자세 추정
+  // 모듈과도 무관한 별개 기능이라, 시연 일정을 고려해 이번 배치에서는 넣지 않는다.
+  // 대신 스캐너 모달 안에서 바코드 코드를 직접 입력받아 barcode_code로 등록한다.
   useEffect(() => {
     if (!isScanning) return;
-
     setScanProgress(0);
     const interval = setInterval(() => {
-      setScanProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsScanning(false);
-          setScanSuccess(`${MOCK_SCANNED_SENIOR_NAME} 어르신을 등록했습니다`);
-
-          // TODO: 실제 등록 로직(seniors 배열 추가) 및 GuardianActivityList로 복귀 연결
-          // (mock 데이터 구조상 김철수가 이미 등록되어 있어 중복 추가 방지 목적으로 스텁 처리)
-          scanTimeoutRef.current = setTimeout(() => {
-            console.log('[AddSeniorScreen] scan success, navigate back to GuardianActivityList (미구현)');
-            setScanSuccess(null);
-          }, 2000);
-
-          return 100;
-        }
-        return prev + 10;
-      });
+      setScanProgress((prev) => (prev >= 100 ? 0 : prev + 10));
     }, 200);
-
     return () => clearInterval(interval);
   }, [isScanning]);
-
-  useEffect(() => {
-    return () => {
-      if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
-    };
-  }, []);
 
   const handleBack = () => {
     navigation.goBack();
   };
 
-  const handleSearch = () => {
-    if (!searchId.trim()) {
-      setSearchError('검색할 아이디를 입력해 주세요.');
-      setSearchedSenior(null);
-      return;
-    }
-
-    const match = MOCK_SEARCH_RESULTS[searchId.trim().toLowerCase()];
-    if (match) {
-      setSearchError(null);
-      setSearchedSenior(match);
-    } else {
-      setSearchError('입력하신 아이디와 일치하는 어르신 정보가 존재하지 않습니다.');
-      setSearchedSenior(null);
+  const registerSenior = async (
+    payload: RegisterPayload,
+    setError: (message: string | null) => void,
+    setBusy: (busy: boolean) => void,
+  ) => {
+    setError(null);
+    setBusy(true);
+    try {
+      const session = await getSession();
+      if (!session) {
+        setError('세션이 만료되었습니다. 다시 로그인해 주세요.');
+        return;
+      }
+      const mapping = await apiClient.post<GuardianSeniorMapResponse>(
+        `/guardian/${session.userId}/seniors/`,
+        payload,
+      );
+      setIsScanning(false);
+      setRegisteredSenior(mapping.senior);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setError('입력하신 정보와 일치하는 어르신을 찾을 수 없습니다. 아이디/바코드를 다시 확인해 주세요.');
+      } else if (err instanceof ApiError && err.status === 409) {
+        setError('이미 등록된 피보호자입니다.');
+      } else {
+        setError(getApiErrorMessage(err, '등록에 실패했습니다. 잠시 후 다시 시도해 주세요.'));
+      }
+    } finally {
+      setBusy(false);
     }
   };
 
-  const handleRegisterSearched = () => {
-    if (!searchedSenior) return;
-    // TODO: 실제 등록 로직(seniors 배열 추가) 및 GuardianActivityList로 복귀 연결
-    console.log(
-      '[AddSeniorScreen] register searched senior, navigate back to GuardianActivityList (미구현):',
-      searchedSenior.name,
+  const handleSearch = () => {
+    if (searchSubmitting) return;
+    const trimmed = searchId.trim();
+    if (!trimmed) {
+      setSearchError('검색할 아이디를 입력해 주세요.');
+      return;
+    }
+    registerSenior(
+      { registered_via: 'id_search', login_id: trimmed },
+      setSearchError,
+      setSearchSubmitting,
     );
-    Alert.alert('', `${searchedSenior.name} 어르신이 피보호자로 등록되었습니다!`);
+  };
+
+  const handleBarcodeSubmit = () => {
+    if (scanSubmitting) return;
+    const trimmed = barcodeCode.trim();
+    if (!trimmed) {
+      setScanError('연동 바코드 코드를 입력해 주세요.');
+      return;
+    }
+    registerSenior(
+      { registered_via: 'barcode', barcode_code: trimmed },
+      setScanError,
+      setScanSubmitting,
+    );
   };
 
   const handleOpenScanner = () => {
+    setScanError(null);
     setIsScanning(true);
   };
 
   const handleCloseScanner = () => {
     setIsScanning(false);
+    setScanError(null);
+  };
+
+  const handleSuccessConfirm = () => {
+    navigation.navigate('GuardianHome');
   };
 
   return (
@@ -160,16 +173,17 @@ export default function AddSeniorScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Method 1: Search by ID */}
+        {/* Method 1: Search by ID (조회 + 등록을 한 번에 처리) */}
         <View style={styles.card}>
           <View style={styles.methodLabelRow}>
             <View style={styles.methodBadge}>
               <Text style={styles.methodBadgeText}>1</Text>
             </View>
-            <Text style={styles.methodLabel}>아이디로 찾기</Text>
+            <Text style={styles.methodLabel}>아이디로 찾아 등록하기</Text>
           </View>
           <Text style={styles.methodDescription}>
-            어르신의 실버비전 앱 아이디(가입정보)를 직접 검색하여 등록합니다.
+            어르신의 실버비전 앱 아이디(가입정보)를 입력하면 조회와 동시에 피보호자로 연동
+            등록됩니다.
           </Text>
 
           <View style={styles.searchRow}>
@@ -178,50 +192,34 @@ export default function AddSeniorScreen() {
               onChangeText={(text) => {
                 setSearchId(text);
                 setSearchError(null);
-                setSearchedSenior(null);
               }}
-              placeholder="예: silver333 또는 silver555"
+              placeholder="예: silver333"
               placeholderTextColor={colors.disabledText}
               autoCapitalize="none"
+              editable={!searchSubmitting}
+              onSubmitEditing={handleSearch}
               style={styles.searchInput}
             />
             <Pressable
               onPress={handleSearch}
-              style={({ pressed }) => [styles.searchButton, pressed && styles.pressedPrimary]}
+              disabled={searchSubmitting}
+              style={({ pressed }) => [
+                styles.searchButton,
+                pressed && styles.pressedPrimary,
+                searchSubmitting && styles.buttonDisabled,
+              ]}
             >
               <Search size={20} color={colors.white} strokeWidth={2.5} />
             </Pressable>
           </View>
 
+          {searchSubmitting ? (
+            <Text style={styles.helperText}>조회 및 등록 중...</Text>
+          ) : null}
+
           {searchError ? (
             <View style={styles.errorBox}>
               <Text style={styles.errorText}>⚠️ {searchError}</Text>
-            </View>
-          ) : null}
-
-          {searchedSenior ? (
-            <View style={styles.resultBox}>
-              <View style={styles.resultTopRow}>
-                <View style={styles.resultAvatar}>
-                  <Text style={styles.resultAvatarText}>{searchedSenior.avatarInitials}</Text>
-                </View>
-                <View style={styles.resultInfo}>
-                  <Text style={styles.resultName}>
-                    {searchedSenior.name} 어르신을 찾았습니다!
-                  </Text>
-                  <Text style={styles.resultAddress}>주소: {searchedSenior.address}</Text>
-                </View>
-              </View>
-              <Pressable
-                onPress={handleRegisterSearched}
-                style={({ pressed }) => [
-                  styles.registerButton,
-                  pressed && styles.pressedPrimary,
-                ]}
-              >
-                <Check size={16} color={colors.white} strokeWidth={2.5} />
-                <Text style={styles.registerButtonText}>이 피보호자로 연동 등록 완료하기</Text>
-              </Pressable>
             </View>
           ) : null}
         </View>
@@ -233,7 +231,7 @@ export default function AddSeniorScreen() {
           <View style={styles.dividerLine} />
         </View>
 
-        {/* Method 2: Scan QR / Barcode */}
+        {/* Method 2: Barcode */}
         <View style={styles.card}>
           <View style={styles.methodLabelRow}>
             <View style={styles.methodBadge}>
@@ -242,8 +240,8 @@ export default function AddSeniorScreen() {
             <Text style={styles.methodLabel}>바코드로 바로 등록하기</Text>
           </View>
           <Text style={styles.methodDescription}>
-            어르신의 모바일 화면 &apos;내 개인정보&apos; 하단에 활성화된 연동 바코드를 카메라로
-            스캔하여 간편하게 등록합니다.
+            어르신의 모바일 화면 &apos;내 개인정보&apos; 하단에 활성화된 연동 바코드를 스캔하거나,
+            바코드 아래의 코드를 직접 입력하여 등록합니다.
           </Text>
 
           <Pressable
@@ -254,9 +252,9 @@ export default function AddSeniorScreen() {
               <QrCode size={32} color={colors.primary} strokeWidth={2} />
             </View>
             <View style={styles.scanTextWrap}>
-              <Text style={styles.scanButtonTitle}>스캔 카메라 켜기</Text>
+              <Text style={styles.scanButtonTitle}>스캔 화면 열기</Text>
               <Text style={styles.scanButtonSubtitle}>
-                카메라로 어르신 화면의 바코드를 비추세요
+                바코드를 비추거나 코드를 직접 입력하세요
               </Text>
             </View>
           </Pressable>
@@ -271,13 +269,13 @@ export default function AddSeniorScreen() {
         </Text>
       </View>
 
-      {/* Simulated Scanner Modal */}
+      {/* Scanner Modal — 레이저 애니메이션은 연출, 실제 등록은 코드 직접 입력 */}
       {isScanning ? (
         <View style={styles.scannerOverlay}>
           <View style={styles.scannerHeader}>
             <View style={styles.scannerHeaderLeft}>
               <Scan size={18} color={colors.scoreGradientEnd} />
-              <Text style={styles.scannerHeaderText}>바코드 자동 스캐너</Text>
+              <Text style={styles.scannerHeaderText}>바코드 연동 등록</Text>
             </View>
             <Pressable
               onPress={handleCloseScanner}
@@ -289,34 +287,77 @@ export default function AddSeniorScreen() {
 
           <View style={styles.scannerBody}>
             <Text style={styles.scannerHint}>
-              어르신 휴대폰 하단의 개인정보에 표시된 바코드를 카메라 박스 안에 맞춰 주세요
+              어르신 휴대폰 하단 개인정보에 표시된 연동 바코드를 카메라 박스 안에 맞추거나,
+              바코드 아래 코드를 아래 칸에 입력해 주세요
             </Text>
 
             <View style={styles.viewfinder}>
               <View style={[styles.laserLine, { top: `${scanProgress}%` }]} />
               <QrCode size={72} color="rgba(16, 185, 129, 0.4)" strokeWidth={1.5} />
               <View style={styles.scanningBadge}>
-                <Text style={styles.scanningBadgeText}>자동 스캔 및 분석 중...</Text>
+                <Text style={styles.scanningBadgeText}>바코드를 비춰 주세요</Text>
               </View>
             </View>
 
-            <Text style={styles.scanProgressText}>식별 프로세스 대기율: {scanProgress}%</Text>
+            <View style={styles.scannerForm}>
+              <TextInput
+                value={barcodeCode}
+                onChangeText={(text) => {
+                  setBarcodeCode(text);
+                  setScanError(null);
+                }}
+                placeholder="연동 바코드 코드 직접 입력"
+                placeholderTextColor={colors.disabledText}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                editable={!scanSubmitting}
+                onSubmitEditing={handleBarcodeSubmit}
+                style={styles.barcodeInput}
+              />
+              <Pressable
+                onPress={handleBarcodeSubmit}
+                disabled={scanSubmitting}
+                style={({ pressed }) => [
+                  styles.barcodeSubmitButton,
+                  pressed && styles.pressedPrimary,
+                  scanSubmitting && styles.buttonDisabled,
+                ]}
+              >
+                <Text style={styles.barcodeSubmitButtonText}>
+                  {scanSubmitting ? '등록 중...' : '이 바코드로 등록하기'}
+                </Text>
+              </Pressable>
+
+              {scanError ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>⚠️ {scanError}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         </View>
       ) : null}
 
-      {/* Scan Success Toast */}
-      {scanSuccess ? (
+      {/* 등록 성공 오버레이 (아이디/바코드 공통) */}
+      {registeredSenior ? (
         <View style={styles.successOverlay}>
           <View style={styles.successCard}>
             <View style={styles.successIconWrap}>
               <Check size={28} color={colors.primary} strokeWidth={3} />
             </View>
             <Text style={styles.successTitle}>피보호자 등록 성공</Text>
-            <Text style={styles.successMessage}>{scanSuccess}</Text>
-            <Text style={styles.successSubtext}>
-              자동으로 관제 센터 홈 화면으로 이동합니다.
+            <Text style={styles.successMessage}>
+              {registeredSenior.name} 어르신을 피보호자로 등록했습니다.
             </Text>
+            <Text style={styles.successSubtext}>
+              보호자 홈에서 등록된 피보호자 목록을 확인할 수 있습니다.
+            </Text>
+            <Pressable
+              onPress={handleSuccessConfirm}
+              style={({ pressed }) => [styles.successButton, pressed && styles.pressedPrimary]}
+            >
+              <Text style={styles.successButtonText}>보호자 홈으로 이동</Text>
+            </Pressable>
           </View>
         </View>
       ) : null}
@@ -432,6 +473,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  helperText: {
+    fontSize: guardianFontSizes.badge,
+    fontWeight: fontWeights.bold,
+    color: colors.textSecondary,
+  },
   errorBox: {
     backgroundColor: colors.dangerBackground,
     borderWidth: 1,
@@ -443,61 +492,6 @@ const styles = StyleSheet.create({
     fontSize: guardianFontSizes.badge,
     fontWeight: fontWeights.bold,
     color: colors.danger,
-  },
-  resultBox: {
-    backgroundColor: colors.emeraldBackground,
-    borderWidth: 1,
-    borderColor: colors.primaryBorderStrong,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.sm + spacing.xs,
-    marginTop: spacing.xs,
-  },
-  resultTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm + spacing.xs,
-  },
-  resultAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  resultAvatarText: {
-    fontSize: guardianFontSizes.badge,
-    fontWeight: fontWeights.black,
-    color: colors.white,
-  },
-  resultInfo: {
-    flex: 1,
-  },
-  resultName: {
-    fontSize: guardianFontSizes.label,
-    fontWeight: fontWeights.extrabold,
-    color: colors.text,
-  },
-  resultAddress: {
-    fontSize: guardianFontSizes.badge,
-    fontWeight: fontWeights.medium,
-    color: colors.disabledText,
-    marginTop: spacing.xs,
-  },
-  registerButton: {
-    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  registerButtonText: {
-    fontSize: guardianFontSizes.badge,
-    fontWeight: fontWeights.black,
-    color: colors.white,
   },
   dividerRow: {
     flexDirection: 'row',
@@ -620,12 +614,12 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.bold,
     color: colors.border,
     textAlign: 'center',
-    maxWidth: 240,
+    maxWidth: 280,
     marginBottom: spacing.lg,
   },
   viewfinder: {
-    width: 220,
-    height: 220,
+    width: 200,
+    height: 200,
     borderWidth: 4,
     borderColor: colors.scoreGradientEnd,
     borderRadius: radius.lg + 4,
@@ -654,11 +648,34 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.black,
     color: colors.scoreGradientEnd,
   },
-  scanProgressText: {
-    fontSize: guardianFontSizes.badge,
-    fontWeight: fontWeights.extrabold,
-    color: colors.scoreGradientEnd,
+  scannerForm: {
+    width: '100%',
+    maxWidth: 320,
     marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  barcodeInput: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.borderLight,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    fontSize: guardianFontSizes.labelSmall,
+    fontWeight: fontWeights.medium,
+    color: colors.text,
+  },
+  barcodeSubmitButton: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  barcodeSubmitButtonText: {
+    fontSize: guardianFontSizes.badge,
+    fontWeight: fontWeights.black,
+    color: colors.white,
   },
   successOverlay: {
     position: 'absolute',
@@ -709,6 +726,20 @@ const styles = StyleSheet.create({
     color: colors.disabledText,
     textAlign: 'center',
     marginTop: spacing.xs,
+  },
+  successButton: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    alignSelf: 'stretch',
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.xs,
+  },
+  successButtonText: {
+    fontSize: guardianFontSizes.button,
+    fontWeight: fontWeights.bold,
+    color: colors.white,
   },
   pressedOpacity: {
     opacity: 0.6,
