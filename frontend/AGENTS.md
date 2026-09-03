@@ -93,8 +93,9 @@ frontend/
 - 시니어 화면 8종 + 보호자 화면 9종 포팅 및 네비게이션(탭 전환, 뒤로가기 스택, 화면 간 실제 연결) 전체 완료됨
 - **백엔드 API 연동 — 화면 단위 진행 중**:
   - 공통 클라이언트 `src/api/client.ts` 구현 완료: `apiClient.{get,post,patch,delete}`, JWT access/refresh를 `AsyncStorage`에 저장·자동 첨부, `ApiError`/`getApiErrorMessage`, 인증 요청 401 시 세션 클리어(refresh 재시도 없음 — 백엔드에 재발급 엔드포인트 없음). 응답 타입 인터페이스도 이 파일에 모으고 각 인터페이스 주석에 대응 백엔드 시리얼라이저를 명시.
-  - 연동 완료 3개: `LoginScreen`(시니어 로그인+프로필 조회), `GuardianLoginScreen`(보호자 로그인+프로필 조회), `ExerciseSelectScreen`(`GET /exercises/`).
-  - 나머지 14개 화면은 `AppStateContext` 목업(`DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`/`DEFAULT_SENIORS`/`DEFAULT_ALERTS` 등)을 그대로 사용. API 스펙은 `backend/AGENTS.md` 5장 표 또는 실제 `backend/api/serializers.py`·`views.py`에서 확인하고, 불명확하면 임의 가정 대신 확인.
+  - 연동 완료: `LoginScreen`(시니어 로그인+프로필 조회), `GuardianLoginScreen`(보호자 로그인+프로필 조회), `ExerciseSelectScreen`(`GET /exercises/`), `SeniorHomeScreen`(포커스마다 `GET /senior/{id}/` fruit_count + `GET /senior/{id}/ranking/`), `ExerciseProgressScreen`·`ExerciseFeedbackScreen`(운동 세션: 진입 시 미션 자동 생성→세션 시작, 결과 화면에서 완료 PATCH + `feedback/` POST).
+  - **운동 세션 연동 흐름**: `ExerciseProgressScreen` mount → `POST /senior/{id}/missions/`(scheduled_at=now, `senior`는 `ExerciseMissionCreateSerializer`가 필수라 본인 id를 body에 실음) → `POST /senior/{id}/sessions/`(`{mission}`, session_id를 ref에 보관). 타이머 완료/건너뛰기 → `ExerciseFeedback`로 `sessionId`+`completionRate`(타이머 경과율) 전달. `ExerciseFeedbackScreen` mount → `PATCH .../sessions/{id}/`(`completion_rate`=경과율, `accuracy_avg`=화면 표시 점수 87) + `POST .../feedback/`(고정 placeholder 배열). **`accuracy_avg`·`completion_rate`·`deviation`은 전부 `// TODO(vision)` 주석이 달린 임시값** — 비전 파이프라인 연결 지점이다. X 버튼 이탈은 `goBack()`만 하고 세션을 미완료(completion_rate=null)로 남긴다(백엔드가 완료로 집계하지 않음).
+  - 나머지 화면은 `AppStateContext` 목업(`DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`/`DEFAULT_SENIORS`/`DEFAULT_ALERTS` 등)을 그대로 사용. API 스펙은 `backend/AGENTS.md` 5장 표 또는 실제 `backend/api/serializers.py`·`views.py`에서 확인하고, 불명확하면 임의 가정 대신 확인.
   - 백엔드 enum → 화면 표시 라벨 변환은 `Record<enum, label>` 타입으로 만들어 enum 확장 시 컴파일 타임에 누락이 드러나게 한다(`ExerciseSelectScreen`의 `DIFFICULTY_LABELS` 참고).
 - 음성 인식 기능 설계 확정 후 `VoiceAssistantModal` 연결
 

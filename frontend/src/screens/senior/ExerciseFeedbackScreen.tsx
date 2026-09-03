@@ -2,8 +2,10 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CheckCircle2, Sparkles } from 'lucide-react-native';
+import { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
+import { apiClient, getSession } from '../../api/client';
 import { RootStackParamList } from '../../navigation/types';
 import {
   colors,
@@ -16,16 +18,62 @@ import {
 
 const SCORE = 87;
 
+// TODO(vision): 실제 BlazePose 관절 편차 배열로 교체 필요. 지금 값은 화면의 정적
+// 진단 그림(왼쪽 팔꿈치 빨강 = 교정 필요, 나머지 초록)과 같은 의미의 고정
+// placeholder이며 실제 측정값이 아니다 - 아직 붙지 않은 비전 파이프라인의 연결
+// 지점을 열어두기 위한 값이다. deviation은 PoseFeedback.deviation(DecimalField,
+// max_digits=5·decimal_places=2)에 그대로 저장된다.
+const PLACEHOLDER_POSE_FEEDBACK = [
+  { joint_name: 'left_elbow', deviation: 12.5 },
+  { joint_name: 'right_elbow', deviation: 2.0 },
+  { joint_name: 'left_knee', deviation: 1.5 },
+  { joint_name: 'right_knee', deviation: 1.5 },
+];
+
 type Route = NativeStackScreenProps<RootStackParamList, 'ExerciseFeedback'>['route'];
 
 export default function ExerciseFeedbackScreen() {
   const navigation = useNavigation();
   const { params } = useRoute<Route>();
-  const { workout } = params;
+  const { workout, sessionId, completionRate } = params;
+
+  // 화면 도달 = "동작 완료" 시점. 여기서 세션 완료 PATCH + 관절 피드백 POST를
+  // 한 번 수행한다(X 버튼 이탈은 이 화면에 오지 않으므로 세션이 미완료로 남는
+  // 흐름과 일관된다). sessionId가 null이면(세션 시작 실패) 조용히 건너뛴다.
+  useEffect(() => {
+    if (sessionId == null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const session = await getSession();
+        if (!session || cancelled) return;
+        // completion_rate는 ExerciseProgress 타이머 경과율(실제 사용자 행동값),
+        // accuracy_avg는 아직 비전 파이프라인이 없어 화면에 표시 중인 정적 점수를
+        // 그대로 싣는다.
+        // TODO(vision): accuracy_avg를 실제 관절 정확도 평균값으로 교체 필요.
+        await apiClient.patch(
+          `/senior/${session.userId}/sessions/${sessionId}/`,
+          { completion_rate: completionRate, accuracy_avg: SCORE },
+        );
+        if (cancelled) return;
+        await apiClient.post(
+          `/senior/${session.userId}/sessions/${sessionId}/feedback/`,
+          PLACEHOLDER_POSE_FEEDBACK,
+        );
+      } catch {
+        // 완료 반영 실패는 조용히 무시한다 - 결과 화면 표시는 정적이라 영향이
+        // 없고, 재시도 UI는 이번 배치 범위 밖(연동 배선만).
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleConfirm = () => {
-    // 열매 개수는 백엔드 fruit_count가 단일 소스다. 세션 완료가 API로 반영되면
-    // (세션 완료 PATCH 연동은 후속 작업) SeniorHomeScreen이 포커스 시 최신 값을 다시 불러온다.
+    // 열매 개수는 백엔드 fruit_count가 단일 소스다. 위 useEffect의 세션 완료
+    // PATCH가 반영되면 SeniorHomeScreen이 포커스 시 최신 fruit_count를 다시 불러온다.
     navigation.navigate('SeniorHome');
   };
 

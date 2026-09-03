@@ -80,6 +80,41 @@ export interface ExerciseResponse {
   reference_angles: Record<string, unknown>;
 }
 
+/**
+ * backend/api/serializers.py의 ExerciseMissionSerializer 응답 형태
+ * (POST /senior/{id}/missions/). ExerciseProgressScreen이 세션 시작 전 미션을
+ * 자동 생성할 때 mission_id만 소비하지만, 시리얼라이저 전체 형태를 남겨둔다.
+ */
+export interface ExerciseMissionResponse {
+  mission_id: number;
+  senior: number;
+  exercise: {
+    exercise_id: number;
+    name: string;
+    category: string;
+    difficulty: ExerciseResponse['difficulty'];
+    guide_image_url: string;
+  };
+  scheduled_at: string;
+  status: 'pending' | 'completed' | 'skipped';
+}
+
+/**
+ * backend/api/serializers.py의 ExerciseSessionSerializer 응답 형태
+ * (POST /senior/{id}/sessions/, PATCH /senior/{id}/sessions/{session_id}/).
+ * completion_rate/accuracy_avg는 DRF DecimalField라 문자열로 직렬화되며,
+ * 세션 시작 직후에는 아직 값이 없어 null이다.
+ */
+export interface ExerciseSessionResponse {
+  session_id: number;
+  mission: number;
+  senior: number;
+  exercise: number;
+  completion_rate: string | null;
+  accuracy_avg: string | null;
+  created_at: string;
+}
+
 const STORAGE_KEYS = {
   accessToken: 'silvervision.auth.accessToken',
   refreshToken: 'silvervision.auth.refreshToken',
