@@ -1,6 +1,7 @@
 import { Mic, Sparkles, Volume2, X } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useAppState } from '../context/AppStateContext';
 import { colors, fontSizes, fontWeights, MIN_TOUCH_TARGET, radius, spacing } from '../theme/theme';
 
 // 참고용 컴포넌트: 음성 인식 기능은 아직 별도 설계가 필요해 미확정 상태입니다.
@@ -12,7 +13,6 @@ interface VoiceAssistantModalProps {
   visible: boolean;
   onClose: () => void;
   onSelectAction: (action: VoiceAssistantAction, workoutId?: string) => void;
-  fruitsCollected: number;
 }
 
 type AssistantStatus = 'listening' | 'processing' | 'speaking';
@@ -32,8 +32,9 @@ export default function VoiceAssistantModal({
   visible,
   onClose,
   onSelectAction,
-  fruitsCollected,
 }: VoiceAssistantModalProps) {
+  // 열매 개수 단일 소스는 userProfile.fruitCount (SeniorHomeScreen이 포커스마다 갱신).
+  const { userProfile } = useAppState();
   const [status, setStatus] = useState<AssistantStatus>('listening');
   const [spokenText, setSpokenText] = useState('');
   const [assistantReply, setAssistantReply] = useState('');
@@ -66,7 +67,9 @@ export default function VoiceAssistantModal({
           onClose();
         }, 2200);
       } else if (action === 'fruits') {
-        setAssistantReply(`어르신은 현재 열매를 총 ${fruitsCollected}개 모으셨어요! 참 잘하셨습니다.`);
+        setAssistantReply(
+          `어르신은 현재 열매를 총 ${userProfile.fruitCount}개 모으셨어요! 참 잘하셨습니다.`,
+        );
         setTimeout(() => {
           onSelectAction('fruits');
         }, 3000);

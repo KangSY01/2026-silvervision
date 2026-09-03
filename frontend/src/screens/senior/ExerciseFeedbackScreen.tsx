@@ -4,7 +4,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { CheckCircle2, Sparkles } from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
-import { useAppState } from '../../context/AppStateContext';
 import { RootStackParamList } from '../../navigation/types';
 import {
   colors,
@@ -23,10 +22,10 @@ export default function ExerciseFeedbackScreen() {
   const navigation = useNavigation();
   const { params } = useRoute<Route>();
   const { workout } = params;
-  const { incrementFruitsCollected } = useAppState();
 
   const handleConfirm = () => {
-    incrementFruitsCollected();
+    // 열매 개수는 백엔드 fruit_count가 단일 소스다. 세션 완료가 API로 반영되면
+    // (세션 완료 PATCH 연동은 후속 작업) SeniorHomeScreen이 포커스 시 최신 값을 다시 불러온다.
     navigation.navigate('SeniorHome');
   };
 

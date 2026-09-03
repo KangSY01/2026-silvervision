@@ -1,7 +1,15 @@
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Award, MapPin, Sparkles } from 'lucide-react-native';
+import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G, Path, Text as SvgText } from 'react-native-svg';
+import {
+  apiClient,
+  getSession,
+  SeniorProfileResponse,
+  SeniorRankingResponse,
+} from '../../api/client';
 import TabScreenLayout from '../../components/TabScreenLayout';
 import { useAppState } from '../../context/AppStateContext';
 import {
@@ -11,6 +19,23 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
+
+const MAX_FRUITS = 6;
+
+// 순위 로드 상태. 시니어 화면이라 로딩/에러/빈 상태 모두 숫자 자리에 짧고 분명한
+// 문구로 대체해 카드 레이아웃이 흔들리지 않게 한다.
+type RankingLoadState = 'loading' | 'ready' | 'error';
+
+// 스냅샷이 있으면 "N위"(isNumber), 없으면(신규 가입·이번 달 완료 세션 0건) "기록 없음".
+function rankDisplay(
+  state: RankingLoadState,
+  snapshot: SeniorRankingResponse['national'],
+): { value: string; isNumber: boolean } {
+  if (state === 'loading') return { value: '불러오는 중', isNumber: false };
+  if (state === 'error') return { value: '표시할 수 없음', isNumber: false };
+  if (!snapshot || snapshot.rank_position == null) return { value: '기록 없음', isNumber: false };
+  return { value: String(snapshot.rank_position), isNumber: true };
+}
 
 const FRUIT_COORDS = [
   { cx: 120, cy: 110 }, // 왼쪽 가지
@@ -22,10 +47,58 @@ const FRUIT_COORDS = [
 ];
 
 export default function SeniorHomeScreen() {
-  const { userProfile, fruitsCollected } = useAppState();
+  const { userProfile, setUserProfile } = useAppState();
   const userName = userProfile.name;
 
-  const fruitSlots = Array.from({ length: 6 }, (_, index) => index < fruitsCollected);
+  const [ranking, setRanking] = useState<SeniorRankingResponse | null>(null);
+  const [rankingState, setRankingState] = useState<RankingLoadState>('loading');
+
+  // 화면 진입/복귀(useFocusEffect)마다 순위와 fruit_count를 다시 불러온다.
+  // 로그인 시점 캐싱(지난 배치 패턴)이 아니라 포커스 시 조회를 택한 이유: 둘 다
+  // 운동 세션 완료 시점에 백엔드가 갱신하는 값이고, SeniorHome은 운동 피드백 뒤
+  // 되돌아오는 화면이라 로그인 값만 캐싱하면 즉시 낡는다. flat 스택이라 탭 복귀 시
+  // 화면이 언마운트되지 않아 useEffect([])로는 재조회가 안 되므로 useFocusEffect를 쓴다.
+  const loadHomeSummary = useCallback(async () => {
+    // 최초 로드만 'loading'을 노출한다. 이미 값을 한 번 받아온 뒤의 포커스 재조회는
+    // 이전 순위를 그대로 두고 조용히 갱신해 탭 복귀마다 "불러오는 중"이 깜빡이지 않게 한다.
+    setRankingState((prev) => (prev === 'ready' ? prev : 'loading'));
+    try {
+      const session = await getSession();
+      if (!session) {
+        setRankingState('error');
+        return;
+      }
+      const [profile, rankingResponse] = await Promise.all([
+        apiClient.get<SeniorProfileResponse>(`/senior/${session.userId}/`),
+        apiClient.get<SeniorRankingResponse>(`/senior/${session.userId}/ranking/`),
+      ]);
+      setRanking(rankingResponse);
+      // fruit_count 단일 소스는 userProfile. 함수형 업데이트라 loadHomeSummary가
+      // userProfile에 의존하지 않고, 값이 실제로 바뀐 경우만 새 객체를 만든다
+      // (포커스마다 딱 한 번만 조회되도록).
+      setUserProfile((prev) =>
+        prev.fruitCount === profile.fruit_count
+          ? prev
+          : { ...prev, fruitCount: profile.fruit_count },
+      );
+      setRankingState('ready');
+    } catch {
+      // 네트워크 실패 등 - 화면(인사말/나무)은 그대로 두고 순위 자리에만 안내 문구.
+      setRankingState('error');
+    }
+  }, [setUserProfile]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadHomeSummary();
+    }, [loadHomeSummary]),
+  );
+
+  const fruitsCollected = Math.max(0, Math.min(userProfile.fruitCount, MAX_FRUITS));
+  const fruitSlots = Array.from({ length: MAX_FRUITS }, (_, index) => index < fruitsCollected);
+
+  const nationalRank = rankDisplay(rankingState, ranking?.national ?? null);
+  const regionalRank = rankDisplay(rankingState, ranking?.regional ?? null);
 
   return (
     <TabScreenLayout activeTab="home">
@@ -55,10 +128,11 @@ export default function SeniorHomeScreen() {
             <View style={[styles.rankIconWrap, { backgroundColor: colors.amberBackground }]}>
               <Award size={28} color={colors.amberIcon} strokeWidth={2.5} />
             </View>
-            <View>
+            <View style={styles.rankTextArea}>
               <Text style={styles.rankLabel}>전국 순위</Text>
-              <Text style={styles.rankValue}>
-                247<Text style={styles.rankUnit}>위</Text>
+              <Text style={[styles.rankValue, !nationalRank.isNumber && styles.rankValueText]}>
+                {nationalRank.value}
+                {nationalRank.isNumber ? <Text style={styles.rankUnit}>위</Text> : null}
               </Text>
             </View>
           </View>
@@ -67,10 +141,11 @@ export default function SeniorHomeScreen() {
             <View style={[styles.rankIconWrap, { backgroundColor: colors.emeraldBackground }]}>
               <MapPin size={28} color={colors.primary} strokeWidth={2.5} />
             </View>
-            <View>
+            <View style={styles.rankTextArea}>
               <Text style={styles.rankLabel}>지역 순위</Text>
-              <Text style={styles.rankValue}>
-                12<Text style={styles.rankUnit}>위</Text>
+              <Text style={[styles.rankValue, !regionalRank.isNumber && styles.rankValueText]}>
+                {regionalRank.value}
+                {regionalRank.isNumber ? <Text style={styles.rankUnit}>위</Text> : null}
               </Text>
             </View>
           </View>
@@ -257,6 +332,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rankTextArea: {
+    flex: 1,
+  },
   rankLabel: {
     fontSize: 14,
     fontWeight: fontWeights.bold,
@@ -267,6 +345,11 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.black,
     color: colors.text,
     marginTop: spacing.xs,
+  },
+  // 로딩/에러/"기록 없음"처럼 숫자가 아닌 안내 문구일 때: 좁은 카드에서 줄바꿈되며
+  // 읽히도록 본문 크기(20pt, 시니어 UI 규칙 하한)로 낮춘다.
+  rankValueText: {
+    fontSize: fontSizes.body,
   },
   rankUnit: {
     fontSize: 14,

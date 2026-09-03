@@ -42,6 +42,30 @@ export interface GuardianProfileResponse {
 }
 
 /**
+ * backend/api/serializers.py의 RankingSnapshotSerializer 응답 형태
+ * (GET /senior/{id}/ranking/ 응답의 national/regional 각 값). 배치 프로세스가 미리
+ * 계산해 둔 순위 스냅샷 한 건이며, score는 "이번 달 완료 세션 수", rank_position은
+ * 표준 경쟁 순위다. rank_position은 모델에서 NULL 허용이라 number | null.
+ */
+export interface RankingSnapshotResponse {
+  snapshot_id: number;
+  senior: number;
+  score: number;
+  snapshot_date: string; // 'YYYY-MM-DD'
+  rank_scope: 'national' | 'regional';
+  rank_position: number | null;
+}
+
+/**
+ * backend/api/views.py의 SeniorRankingView 응답 형태 (GET /senior/{id}/ranking/).
+ * 완료한 세션이 없는 신규 시니어는 해당 scope가 null이다("순위 없음"은 정상 상태, 200).
+ */
+export interface SeniorRankingResponse {
+  national: RankingSnapshotResponse | null;
+  regional: RankingSnapshotResponse | null;
+}
+
+/**
  * backend/api/serializers.py의 ExerciseSerializer 응답 형태 (GET /exercises/,
  * /exercises/{id}/). reference_angles는 온디바이스 AI가 관절 각도 편차를 계산할 때
  * 쓰는 기준값이라 이 화면들에서 아직 소비하지 않아 구체 형태를 좁히지 않는다.

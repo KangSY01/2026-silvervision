@@ -1,4 +1,11 @@
-import { createContext, ReactNode, useContext, useState } from 'react';
+import {
+  createContext,
+  Dispatch,
+  ReactNode,
+  SetStateAction,
+  useContext,
+  useState,
+} from 'react';
 import { EmergencyEvent, Guardian, Senior, UserProfile } from '../types';
 
 // 로그인 전 초기값(플레이스홀더). LoginScreen이 로그인 성공 시 GET /senior/{id}/
@@ -13,6 +20,7 @@ const DEFAULT_PROFILE: UserProfile = {
   diseases: '초기 퇴행성 관절염, 약간의 이명',
   activityLevel: '독립',
   medication: '혈압약 (아침 1정)',
+  fruitCount: 0,
 };
 
 // 로그인 전 초기값(플레이스홀더). GuardianLoginScreen이 로그인 성공 시
@@ -93,20 +101,15 @@ const DEFAULT_ALERTS: EmergencyEvent[] = [
   },
 ];
 
-const DEFAULT_FRUITS_COLLECTED = 4;
-const MAX_FRUITS = 6;
-
 interface AppStateContextValue {
   userProfile: UserProfile;
-  setUserProfile: (profile: UserProfile) => void;
+  setUserProfile: Dispatch<SetStateAction<UserProfile>>;
   guardianProfile: Guardian;
   setGuardianProfile: (guardian: Guardian) => void;
   seniors: Senior[];
   setSeniors: (seniors: Senior[]) => void;
   alerts: EmergencyEvent[];
   setAlerts: (alerts: EmergencyEvent[]) => void;
-  fruitsCollected: number;
-  incrementFruitsCollected: () => void;
 }
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
@@ -116,11 +119,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [guardianProfile, setGuardianProfile] = useState<Guardian>(DEFAULT_GUARDIAN);
   const [seniors, setSeniors] = useState<Senior[]>(DEFAULT_SENIORS);
   const [alerts, setAlerts] = useState<EmergencyEvent[]>(DEFAULT_ALERTS);
-  const [fruitsCollected, setFruitsCollected] = useState(DEFAULT_FRUITS_COLLECTED);
-
-  const incrementFruitsCollected = () => {
-    setFruitsCollected((prev) => Math.min(prev + 1, MAX_FRUITS));
-  };
 
   return (
     <AppStateContext.Provider
@@ -133,8 +131,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setSeniors,
         alerts,
         setAlerts,
-        fruitsCollected,
-        incrementFruitsCollected,
       }}
     >
       {children}

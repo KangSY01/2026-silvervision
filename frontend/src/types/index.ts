@@ -9,6 +9,9 @@ export interface UserProfile {
   diseases: string;
   activityLevel: ActivityLevel;
   medication: string;
+  // SeniorProfileResponse.fruit_count(게임화 보상 열매 개수)의 단일 소스.
+  // 로그인 시 채워지고, SeniorHomeScreen이 포커스마다 최신 값으로 갱신한다.
+  fruitCount: number;
 }
 
 export interface Guardian {

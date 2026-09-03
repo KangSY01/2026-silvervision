@@ -71,6 +71,7 @@ export default function LoginScreen() {
         diseases: profileResponse.diseases,
         medication: profileResponse.medication,
         activityLevel: MOBILITY_LEVEL_TO_ACTIVITY_LEVEL[profileResponse.mobility_level],
+        fruitCount: profileResponse.fruit_count,
         // 백엔드 응답에는 비밀번호가 없으므로(SeniorProfileSerializer에 password 필드
         // 자체가 없음) 로그인 폼에 입력한 값을 그대로 보관한다 - 기존 목업 동작과 동일.
         pw,

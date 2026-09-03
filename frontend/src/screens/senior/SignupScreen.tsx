@@ -60,6 +60,9 @@ export default function SignupScreen() {
       diseases,
       activityLevel,
       medication,
+      // 신규 가입 시니어는 아직 획득한 열매가 없다. 실제 값은 로그인 후
+      // SeniorHomeScreen이 GET /senior/{id}/ 로 갱신한다.
+      fruitCount: 0,
     };
 
     setUserProfile(profile);
