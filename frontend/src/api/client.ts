@@ -140,6 +140,57 @@ export interface GuardianSeniorMapResponse {
   created_at: string;
 }
 
+export type EmergencyStatus =
+  | 'detected'
+  | 'first_check'
+  | 'false_alarm'
+  | 'notified'
+  | 'resolved';
+
+export type EmergencyEventType = 'fall' | 'inactivity' | 'sos';
+
+/**
+ * backend/api/serializers.py의 EmergencyEventSerializer 응답 형태
+ * (GET /emergency/ 목록 항목, PATCH /emergency/{id}/ 응답). senior는 PK(정수)만
+ * 담기며 이름은 nested되지 않는다 - 이름이 필요하면 GET /guardian/{id}/seniors/의
+ * senior 요약과 senior_id로 맞춘다.
+ */
+export interface EmergencyEventResponse {
+  event_id: number;
+  senior: number;
+  event_type: EmergencyEventType;
+  detection_source: string;
+  status: EmergencyStatus;
+  created_at: string;
+}
+
+/** backend/api/serializers.py의 EmergencyNotificationSerializer (상세 nested). */
+export interface EmergencyNotificationResponse {
+  notification_id: number;
+  event: number;
+  guardian: number;
+  channel: string;
+  sent_at: string;
+}
+
+/** backend/api/serializers.py의 CameraAccessGrantSerializer (상세 nested). */
+export interface CameraAccessGrantResponse {
+  grant_id: number;
+  event: number;
+  granted_at: string;
+  expires_at: string;
+}
+
+/**
+ * backend/api/serializers.py의 EmergencyEventDetailSerializer 응답 형태
+ * (GET /emergency/{id}/). 목록 필드에 알림 발송 이력·카메라 접근 권한 이력이
+ * nested로 더해진다.
+ */
+export interface EmergencyEventDetailResponse extends EmergencyEventResponse {
+  notifications: EmergencyNotificationResponse[];
+  camera_grants: CameraAccessGrantResponse[];
+}
+
 const STORAGE_KEYS = {
   accessToken: 'silvervision.auth.accessToken',
   refreshToken: 'silvervision.auth.refreshToken',

@@ -26,7 +26,8 @@ export type RootStackParamList = {
   SeniorDetail: { seniorId: string };
   GuardianProfile: undefined;
   AlertHistory: undefined;
-  AlertDetail: { alertId: string };
+  // 백엔드 emergency_event.event_id (정수). 상세 화면이 GET /emergency/{eventId}/로 조회한다.
+  AlertDetail: { eventId: number };
 };
 
 // useNavigation()/useRoute()를 화면마다 제네릭 없이 쓸 수 있도록 전역 타입을 확장합니다.

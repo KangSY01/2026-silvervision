@@ -9,9 +9,17 @@ import {
   Play,
   User,
 } from 'lucide-react-native';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line } from 'react-native-svg';
-import { useAppState } from '../../context/AppStateContext';
+import {
+  apiClient,
+  EmergencyEventDetailResponse,
+  getApiErrorMessage,
+  getSession,
+  GuardianSeniorMapResponse,
+  MappedSeniorResponse,
+} from '../../api/client';
 import { RootStackParamList } from '../../navigation/types';
 import {
   colors,
@@ -21,7 +29,15 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
+import {
+  canResolveAlert,
+  EMERGENCY_STATUS_LABELS,
+  EMERGENCY_TYPE_LABELS,
+  formatEmergencyTimestamp,
+  isAlertClosed,
+} from './emergency';
 
+// 비전팀이 실제 센서/영상 데이터를 넣을 자리. 이번 배치에서는 목업 그대로 둔다.
 const TIMELINE = [
   {
     id: 't1',
@@ -49,13 +65,47 @@ const TIMELINE = [
   },
 ];
 
+type LoadState = 'loading' | 'ready' | 'error';
+
 export default function AlertDetailScreen() {
   const navigation = useNavigation();
   const route = useRoute<RouteProp<RootStackParamList, 'AlertDetail'>>();
-  const { alerts, seniors } = useAppState();
+  const { eventId } = route.params;
 
-  const alert = alerts.find((item) => item.id === route.params.alertId);
-  const senior = seniors.find((item) => item.name === alert?.seniorName);
+  const [detail, setDetail] = useState<EmergencyEventDetailResponse | null>(null);
+  const [seniorInfo, setSeniorInfo] = useState<MappedSeniorResponse | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [submitting, setSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // 상세(GET /emergency/{id}/)와 매핑 목록(GET /guardian/{id}/seniors/)을 함께
+  // 불러온다 - EmergencyEventSerializer.senior가 PK만 주고 이름/연락처가
+  // nested되지 않아, 매핑 목록의 senior 요약에서 senior_id로 맞춘다.
+  const load = useCallback(async () => {
+    setLoadState((prev) => (prev === 'ready' ? prev : 'loading'));
+    try {
+      const session = await getSession();
+      if (!session) {
+        setLoadState('error');
+        return;
+      }
+      const [detailRes, mappings] = await Promise.all([
+        apiClient.get<EmergencyEventDetailResponse>(`/emergency/${eventId}/`),
+        apiClient.get<GuardianSeniorMapResponse[]>(`/guardian/${session.userId}/seniors/`),
+      ]);
+      setDetail(detailRes);
+      setSeniorInfo(
+        mappings.find((m) => m.senior.senior_id === detailRes.senior)?.senior ?? null,
+      );
+      setLoadState('ready');
+    } catch {
+      setLoadState('error');
+    }
+  }, [eventId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleBack = () => {
     navigation.goBack();
@@ -66,25 +116,41 @@ export default function AlertDetailScreen() {
     console.log('[AlertDetailScreen] play skeletal replay (미구현)');
   };
 
-  const handleMarkFalsePositive = () => {
-    // TODO: 실제 알림 상태 변경(오탐 처리) 로직 연결
-    console.log('[AlertDetailScreen] mark as false positive (미구현):', alert?.id);
+  // 보호자가 수행 가능한 유일한 상태 전이(→resolved). "오보 처리"·"미확인으로
+  // 재지정"은 백엔드 전이표에 없어 버튼 자체를 두지 않는다(emergency.ts 주석 참고).
+  const handleResolve = async () => {
+    if (!detail || submitting) return;
+    setSubmitting(true);
+    setActionError(null);
+    try {
+      const session = await getSession();
+      if (!session) {
+        setActionError('세션이 만료되었습니다. 다시 로그인해 주세요.');
+        return;
+      }
+      await apiClient.patch(`/emergency/${detail.event_id}/`, { status: 'resolved' });
+      await load();
+    } catch (err) {
+      setActionError(
+        getApiErrorMessage(err, '상태를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.'),
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleConfirm = () => {
-    // TODO: 실제 알림 상태 변경(확인 완료) 로직 연결
-    console.log('[AlertDetailScreen] confirm alert (미구현):', alert?.id);
-  };
-
-  const handleReopen = () => {
-    // TODO: 실제 알림 상태 변경(미확인으로 재지정) 로직 연결
-    console.log('[AlertDetailScreen] reopen alert (미구현):', alert?.id);
-  };
-
-  if (!alert) {
+  if (loadState === 'loading') {
     return (
       <View style={styles.notFoundContainer}>
-        <Text style={styles.notFoundText}>선택된 알림 정보가 없습니다.</Text>
+        <Text style={styles.notFoundText}>알림 정보를 불러오는 중...</Text>
+      </View>
+    );
+  }
+
+  if (loadState === 'error' || !detail) {
+    return (
+      <View style={styles.notFoundContainer}>
+        <Text style={styles.notFoundText}>알림 정보를 불러오지 못했습니다.</Text>
         <Pressable
           onPress={handleBack}
           style={({ pressed }) => [styles.notFoundButton, pressed && styles.pressedPrimary]}
@@ -95,24 +161,21 @@ export default function AlertDetailScreen() {
     );
   }
 
-  let statusBadgeText = '미확인';
+  const open = !isAlertClosed(detail.status);
+  const seniorName = seniorInfo?.name ?? `어르신 #${detail.senior}`;
+  const typeLabel = EMERGENCY_TYPE_LABELS[detail.event_type];
+
   let statusBadgeStyle = styles.statusBadgeUnconfirmed;
   let statusBadgeTextStyle = styles.statusBadgeTextUnconfirmed;
-  if (alert.status === '확인됨') {
-    statusBadgeText = '확인 완료';
+  if (detail.status === 'resolved') {
     statusBadgeStyle = styles.statusBadgeOk;
     statusBadgeTextStyle = styles.statusBadgeTextOk;
-  } else if (alert.status === '오탐') {
-    statusBadgeText = '오보 (오탐)';
+  } else if (detail.status === 'false_alarm') {
     statusBadgeStyle = styles.statusBadgeWarn;
     statusBadgeTextStyle = styles.statusBadgeTextWarn;
   }
 
-  const typeLabel = alert.type === 'fall' ? '낙상 감지' : '부상 의심';
-  // 원본 참고 소스는 연락처/주소를 알림과 무관한 고정값으로 표시했으나,
-  // 실제로는 seniors 목록의 진짜 정보와 어긋나므로 연동해서 정확한 값을 보여준다.
-  const contactPhone = senior?.phone || '정보 없음';
-  const contactAddress = senior?.address || '정보 없음';
+  const latestNotification = detail.notifications[detail.notifications.length - 1];
 
   return (
     <View style={styles.container}>
@@ -128,10 +191,10 @@ export default function AlertDetailScreen() {
         <View style={styles.headerTitleRow}>
           <View style={styles.headerTitleLeft}>
             <Text style={styles.title}>실시간 분석 리포트</Text>
-            <Text style={styles.subtitle}>{alert.seniorName} 어르신 스마트 관절 분석 데이터</Text>
+            <Text style={styles.subtitle}>{seniorName} 어르신 스마트 관절 분석 데이터</Text>
           </View>
           <View style={statusBadgeStyle}>
-            <Text style={statusBadgeTextStyle}>{statusBadgeText}</Text>
+            <Text style={statusBadgeTextStyle}>{EMERGENCY_STATUS_LABELS[detail.status]}</Text>
           </View>
         </View>
       </View>
@@ -144,20 +207,18 @@ export default function AlertDetailScreen() {
         {/* Core Event Information Card */}
         <View style={styles.card}>
           <View style={styles.eventRow}>
-            <View
-              style={[
-                styles.eventIconWrap,
-                alert.status === '미확인' && styles.eventIconWrapUnconfirmed,
-              ]}
-            >
+            <View style={[styles.eventIconWrap, open && styles.eventIconWrapUnconfirmed]}>
               <AlertTriangle size={22} color={colors.danger} strokeWidth={2} />
             </View>
             <View style={styles.eventInfo}>
               <Text style={styles.eventOverline}>발생 경보</Text>
-              <Text style={styles.eventTitle}>{alert.message || `${typeLabel} 의심 감지`}</Text>
+              <Text style={styles.eventTitle}>{typeLabel} 의심 감지</Text>
+              <Text style={styles.detectionSource}>감지 출처: {detail.detection_source}</Text>
               <View style={styles.eventTimeRow}>
                 <Clock size={13} color={colors.disabledText} />
-                <Text style={styles.eventTime}>감지 시각: {alert.timestamp}</Text>
+                <Text style={styles.eventTime}>
+                  감지 시각: {formatEmergencyTimestamp(detail.created_at)}
+                </Text>
               </View>
             </View>
           </View>
@@ -237,55 +298,79 @@ export default function AlertDetailScreen() {
           </View>
         </View>
 
-        {/* Contact/Action Details */}
+        {/* Contact / Response History */}
         <View style={styles.card}>
-          <Text style={styles.contactHeader}>안심 정보 및 연락망</Text>
+          <Text style={styles.contactHeader}>안심 정보 및 대응 이력</Text>
 
           <View style={styles.contactRow}>
             <View style={styles.contactLabelRow}>
               <User size={14} color={colors.disabledText} />
               <Text style={styles.contactLabel}>피보호자 연락처</Text>
             </View>
-            <Text style={styles.contactValue}>
-              {alert.seniorName} 어르신 ({contactPhone})
+            <Text style={[styles.contactValue, styles.contactValueRight]}>
+              {seniorName} 어르신 ({seniorInfo?.phone ?? '정보 없음'})
             </Text>
           </View>
+
           <View style={styles.contactRow}>
             <View style={styles.contactLabelRow}>
               <MapPin size={14} color={colors.disabledText} />
-              <Text style={styles.contactLabel}>등록된 자택 주소</Text>
+              <Text style={styles.contactLabel}>보호자 알림 발송</Text>
             </View>
-            <Text style={[styles.contactValue, styles.contactValueRight]}>{contactAddress}</Text>
+            <Text style={[styles.contactValue, styles.contactValueRight]}>
+              {detail.notifications.length > 0
+                ? `${detail.notifications.length}건` +
+                  (latestNotification
+                    ? ` (최근 ${formatEmergencyTimestamp(latestNotification.sent_at)})`
+                    : '')
+                : '발송 이력 없음'}
+            </Text>
+          </View>
+
+          <View style={styles.contactRow}>
+            <View style={styles.contactLabelRow}>
+              <Info size={14} color={colors.disabledText} />
+              <Text style={styles.contactLabel}>카메라 접근 허용</Text>
+            </View>
+            <Text style={[styles.contactValue, styles.contactValueRight]}>
+              {detail.camera_grants.length > 0
+                ? `${detail.camera_grants.length}건`
+                : '허용 이력 없음'}
+            </Text>
           </View>
         </View>
       </ScrollView>
 
-      {/* Action Buttons & Confirmation Status Update Bar */}
+      {/* Action Bar — 보호자가 할 수 있는 동작은 "상황 확인 완료"(→resolved) 하나 */}
       <View style={styles.footer}>
-        {alert.status === '미확인' ? (
-          <View style={styles.footerRow}>
-            <Pressable
-              onPress={handleMarkFalsePositive}
-              style={({ pressed }) => [styles.warnButton, pressed && styles.warnButtonPressed]}
-            >
-              <AlertTriangle size={18} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.warnButtonText}>오보(오탐) 처리</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleConfirm}
-              style={({ pressed }) => [styles.okButton, pressed && styles.okButtonPressed]}
-            >
-              <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.okButtonText}>상황 확인 완료</Text>
-            </Pressable>
+        {actionError ? <Text style={styles.actionErrorText}>⚠️ {actionError}</Text> : null}
+
+        {detail.status === 'resolved' ? (
+          <View style={styles.resolvedBanner}>
+            <CheckCircle2 size={18} color={colors.primary} strokeWidth={2.5} />
+            <Text style={styles.resolvedBannerText}>이 알림은 종결 처리되었습니다</Text>
           </View>
-        ) : (
+        ) : canResolveAlert(detail.status) ? (
           <Pressable
-            onPress={handleReopen}
-            style={({ pressed }) => [styles.reopenButton, pressed && styles.pressedOpacity]}
+            onPress={handleResolve}
+            disabled={submitting}
+            style={({ pressed }) => [
+              styles.okButton,
+              pressed && styles.okButtonPressed,
+              submitting && styles.okButtonDisabled,
+            ]}
           >
-            <Text style={styles.reopenButtonText}>알림 상태 &apos;미확인&apos;으로 재지정</Text>
+            <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
+            <Text style={styles.okButtonText}>
+              {submitting ? '처리 중...' : '상황 확인 완료'}
+            </Text>
           </Pressable>
+        ) : (
+          <View style={styles.actionInfoBox}>
+            <Text style={styles.actionInfoText}>
+              현재 대응이 진행 중인 알림입니다. 상태가 갱신되면 확인 완료 처리를 할 수 있습니다.
+            </Text>
+          </View>
         )}
       </View>
     </View>
@@ -448,6 +533,12 @@ const styles = StyleSheet.create({
     fontSize: guardianFontSizes.button,
     fontWeight: fontWeights.black,
     color: colors.text,
+    marginTop: spacing.xs,
+  },
+  detectionSource: {
+    fontSize: guardianFontSizes.small,
+    fontWeight: fontWeights.bold,
+    color: colors.textSecondary,
     marginTop: spacing.xs,
   },
   eventTimeRow: {
@@ -626,31 +717,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.borderLight,
-  },
-  footerRow: {
-    flexDirection: 'row',
     gap: spacing.sm,
   },
-  warnButton: {
-    flex: 1,
-    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
-    backgroundColor: colors.amberFill,
-    borderRadius: radius.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  warnButtonPressed: {
-    backgroundColor: colors.amberIcon,
-  },
-  warnButtonText: {
-    fontSize: guardianFontSizes.label,
-    fontWeight: fontWeights.black,
-    color: colors.white,
+  actionErrorText: {
+    fontSize: guardianFontSizes.small,
+    fontWeight: fontWeights.bold,
+    color: colors.danger,
   },
   okButton: {
-    flex: 1,
     minHeight: GUARDIAN_MIN_TOUCH_TARGET,
     backgroundColor: colors.primary,
     borderRadius: radius.lg,
@@ -662,22 +736,45 @@ const styles = StyleSheet.create({
   okButtonPressed: {
     backgroundColor: '#1B5E20',
   },
+  okButtonDisabled: {
+    opacity: 0.6,
+  },
   okButtonText: {
     fontSize: guardianFontSizes.label,
     fontWeight: fontWeights.black,
     color: colors.white,
   },
-  reopenButton: {
+  resolvedBanner: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    backgroundColor: colors.emeraldBackground,
+    borderWidth: 1,
+    borderColor: colors.emeraldBorderLight,
+    borderRadius: radius.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  resolvedBannerText: {
+    fontSize: guardianFontSizes.labelSmall,
+    fontWeight: fontWeights.black,
+    color: colors.primary,
+  },
+  actionInfoBox: {
     minHeight: GUARDIAN_MIN_TOUCH_TARGET,
     backgroundColor: colors.grayBadgeBackground,
     borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  reopenButtonText: {
-    fontSize: guardianFontSizes.labelSmall,
-    fontWeight: fontWeights.black,
+  actionInfoText: {
+    fontSize: guardianFontSizes.small,
+    fontWeight: fontWeights.bold,
     color: colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   pressedOpacity: {
     opacity: 0.6,

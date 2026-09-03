@@ -1,15 +1,21 @@
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   ArrowLeft,
   Bell,
   CheckCircle2,
   ChevronRight,
   Clock,
+  Info,
   ShieldAlert,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useAppState } from '../../context/AppStateContext';
+import {
+  apiClient,
+  EmergencyEventResponse,
+  getSession,
+  GuardianSeniorMapResponse,
+} from '../../api/client';
 import {
   colors,
   fontWeights,
@@ -18,31 +24,72 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
-import { EmergencyEvent } from '../../types';
+import {
+  AlertFilterKey,
+  EMERGENCY_STATUS_LABELS,
+  EMERGENCY_TYPE_LABELS,
+  formatEmergencyTimestamp,
+  isAlertClosed,
+  matchesAlertFilter,
+} from './emergency';
 
-type FilterKey = 'all' | 'unconfirmed' | 'resolved';
+type LoadState = 'loading' | 'ready' | 'error';
 
 export default function AlertHistoryScreen() {
   const navigation = useNavigation();
-  const { alerts } = useAppState();
-  const [filter, setFilter] = useState<FilterKey>('all');
+  const [filter, setFilter] = useState<AlertFilterKey>('all');
+  const [events, setEvents] = useState<EmergencyEventResponse[]>([]);
+  const [seniorNames, setSeniorNames] = useState<Record<number, string>>({});
+  const [loadState, setLoadState] = useState<LoadState>('loading');
 
-  const filteredAlerts = alerts.filter((alert) => {
-    if (filter === 'unconfirmed') return alert.status === '미확인';
-    if (filter === 'resolved') return alert.status !== '미확인';
-    return true;
-  });
+  // 화면 진입/복귀마다 다시 불러온다(상세에서 상태를 바꾸고 돌아오면 목록에 반영돼야
+  // 하므로). GET /emergency/ 는 이미 보호자 매핑 기준으로 필터링돼서 오고,
+  // senior 이름은 nested되지 않아 GET /guardian/{id}/seniors/ 를 함께 불러와
+  // senior_id → 이름 맵을 만든다.
+  const loadAlerts = useCallback(async () => {
+    setLoadState((prev) => (prev === 'ready' ? prev : 'loading'));
+    try {
+      const session = await getSession();
+      if (!session) {
+        setLoadState('error');
+        return;
+      }
+      const [eventList, mappings] = await Promise.all([
+        apiClient.get<EmergencyEventResponse[]>('/emergency/'),
+        apiClient.get<GuardianSeniorMapResponse[]>(`/guardian/${session.userId}/seniors/`),
+      ]);
+      setEvents(eventList);
+      setSeniorNames(
+        Object.fromEntries(mappings.map((m) => [m.senior.senior_id, m.senior.name])),
+      );
+      setLoadState('ready');
+    } catch {
+      setLoadState('error');
+    }
+  }, []);
 
-  const unconfirmedCount = alerts.filter((alert) => alert.status === '미확인').length;
-  const resolvedCount = alerts.filter((alert) => alert.status !== '미확인').length;
+  useFocusEffect(
+    useCallback(() => {
+      loadAlerts();
+    }, [loadAlerts]),
+  );
+
+  const unconfirmedCount = useMemo(
+    () => events.filter((e) => !isAlertClosed(e.status)).length,
+    [events],
+  );
+  const resolvedCount = events.length - unconfirmedCount;
+  const filteredEvents = events.filter((e) => matchesAlertFilter(e.status, filter));
 
   const handleBack = () => {
     navigation.goBack();
   };
 
-  const handleSelectAlert = (alert: EmergencyEvent) => {
-    navigation.navigate('AlertDetail', { alertId: alert.id });
+  const handleSelectAlert = (event: EmergencyEventResponse) => {
+    navigation.navigate('AlertDetail', { eventId: event.event_id });
   };
+
+  const seniorLabel = (seniorId: number) => seniorNames[seniorId] ?? `어르신 #${seniorId}`;
 
   return (
     <View style={styles.container}>
@@ -79,7 +126,7 @@ export default function AlertHistoryScreen() {
             style={[styles.filterPill, filter === 'all' && styles.filterPillActiveAll]}
           >
             <Text style={[styles.filterPillText, filter === 'all' && styles.filterPillTextActive]}>
-              전체 ({alerts.length})
+              전체 ({events.length})
             </Text>
           </Pressable>
           <Pressable
@@ -117,7 +164,19 @@ export default function AlertHistoryScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {filteredAlerts.length === 0 ? (
+        {loadState === 'loading' ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>알림 기록을 불러오는 중...</Text>
+          </View>
+        ) : loadState === 'error' ? (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconWrap}>
+              <Info size={28} color={colors.danger} />
+            </View>
+            <Text style={styles.emptyTitle}>기록을 불러오지 못했습니다</Text>
+            <Text style={styles.emptySubtitle}>잠시 후 다시 시도해 주세요.</Text>
+          </View>
+        ) : filteredEvents.length === 0 ? (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconWrap}>
               <CheckCircle2 size={28} color={colors.disabledText} />
@@ -126,36 +185,34 @@ export default function AlertHistoryScreen() {
             <Text style={styles.emptySubtitle}>현재 모든 어르신들이 안전한 상태입니다.</Text>
           </View>
         ) : (
-          filteredAlerts.map((alert) => {
-            let cardStyle = styles.card;
-            let iconWrapStyle = styles.iconWrapNeutral;
-            let iconColor = colors.danger;
-            let badgeStyle = styles.badgeNeutral;
-            let badgeTextStyle = styles.badgeTextNeutral;
-            let displayStatus: string = alert.status;
+          filteredEvents.map((event) => {
+            const closed = isAlertClosed(event.status);
+            const isFalseAlarm = event.status === 'false_alarm';
 
-            if (alert.status === '미확인') {
-              cardStyle = styles.cardUnconfirmed;
-              iconWrapStyle = styles.iconWrapUnconfirmed;
-              badgeStyle = styles.badgeUnconfirmed;
-              badgeTextStyle = styles.badgeTextUnconfirmed;
-            } else if (alert.status === '확인됨') {
-              iconColor = colors.primary;
-              iconWrapStyle = styles.iconWrapOk;
-              badgeStyle = styles.badgeOk;
-              badgeTextStyle = styles.badgeTextOk;
-            } else if (alert.status === '오탐') {
-              iconColor = colors.amberIcon;
+            let cardStyle = styles.cardUnconfirmed;
+            let iconWrapStyle = styles.iconWrapUnconfirmed;
+            let iconColor = colors.danger;
+            let badgeStyle = styles.badgeUnconfirmed;
+            let badgeTextStyle = styles.badgeTextUnconfirmed;
+
+            if (isFalseAlarm) {
+              cardStyle = styles.card;
               iconWrapStyle = styles.iconWrapWarn;
+              iconColor = colors.amberIcon;
               badgeStyle = styles.badgeWarn;
               badgeTextStyle = styles.badgeTextWarn;
-              displayStatus = '오보';
+            } else if (closed) {
+              cardStyle = styles.card;
+              iconWrapStyle = styles.iconWrapOk;
+              iconColor = colors.primary;
+              badgeStyle = styles.badgeOk;
+              badgeTextStyle = styles.badgeTextOk;
             }
 
             return (
               <Pressable
-                key={alert.id}
-                onPress={() => handleSelectAlert(alert)}
+                key={event.event_id}
+                onPress={() => handleSelectAlert(event)}
                 style={({ pressed }) => [cardStyle, pressed && styles.cardPressed]}
               >
                 <View style={styles.cardLeft}>
@@ -165,15 +222,19 @@ export default function AlertHistoryScreen() {
 
                   <View style={styles.cardInfo}>
                     <View style={styles.cardTopRow}>
-                      <Text style={styles.cardName}>{alert.seniorName} 어르신</Text>
+                      <Text style={styles.cardName}>{seniorLabel(event.senior)} 어르신</Text>
                       <View style={badgeStyle}>
-                        <Text style={badgeTextStyle}>{displayStatus}</Text>
+                        <Text style={badgeTextStyle}>{EMERGENCY_STATUS_LABELS[event.status]}</Text>
                       </View>
                     </View>
-                    <Text style={styles.cardMessage}>{alert.message}</Text>
+                    <Text style={styles.cardMessage}>
+                      {EMERGENCY_TYPE_LABELS[event.event_type]} 감지
+                    </Text>
                     <View style={styles.cardTimeRow}>
                       <Clock size={11} color={colors.disabledText} />
-                      <Text style={styles.cardTime}>{alert.timestamp}</Text>
+                      <Text style={styles.cardTime}>
+                        {formatEmergencyTimestamp(event.created_at)}
+                      </Text>
                     </View>
                   </View>
                 </View>
@@ -353,14 +414,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm + spacing.xs,
     flex: 1,
   },
-  iconWrapNeutral: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.grayBadgeBackground,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   iconWrapUnconfirmed: {
     width: 44,
     height: 44,
@@ -397,19 +450,6 @@ const styles = StyleSheet.create({
     fontSize: guardianFontSizes.button,
     fontWeight: fontWeights.extrabold,
     color: colors.text,
-  },
-  badgeNeutral: {
-    backgroundColor: colors.grayBadgeBackground,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    borderRadius: radius.md - 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs / 2,
-  },
-  badgeTextNeutral: {
-    fontSize: guardianFontSizes.small,
-    fontWeight: fontWeights.black,
-    color: colors.textMuted,
   },
   badgeUnconfirmed: {
     backgroundColor: colors.dangerBackground,
