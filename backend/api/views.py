@@ -26,7 +26,13 @@ from .models import (
     Senior,
 )
 from .gamification import latest_ranking, recalculate_rankings, recompute_fruit_count
-from .permissions import IsGuardianSelf, IsSenior, IsSeniorOrGuardian, IsSeniorSelf
+from .permissions import (
+    IsGuardianSelf,
+    IsSenior,
+    IsSeniorOrGuardian,
+    IsSeniorSelf,
+    IsSeniorSelfOrMappedGuardian,
+)
 from .serializers import (
     ActivityLogSerializer,
     AlreadyRegistered,
@@ -374,15 +380,23 @@ class ExerciseMissionStatusUpdateView(generics.UpdateAPIView):
 
 class ExerciseSessionListCreateView(generics.ListCreateAPIView):
     """
-    GET  - 이 시니어의 세션 목록 (최신순). IsSeniorSelf + get_queryset의
-           senior_id 필터로 본인 세션만 나온다.
-    POST - 세션 시작. body에서 mission만 받는다. senior_id 소속이 아닌
-           mission을 보내면 ExerciseSessionStartSerializer.validate_mission이
-           400으로 거부한다 (URL이 아니라 body로 들어온 참조값의 유효성
-           문제라 403/404가 아닌 400을 택했다 - V6에서 URL 자체가 가리키는
+    GET  - 이 시니어의 세션 목록 (최신순). 시니어 본인 또는
+           GuardianSeniorMap으로 연결된 보호자가 조회할 수 있고
+           (IsSeniorSelfOrMappedGuardian), get_queryset의 senior_id
+           필터로 그 시니어 세션만 나온다. 매핑 안 된 보호자·타 시니어는
+           403 (권한 계층에서 거부).
+    POST - 세션 시작. **시니어 본인만** (IsSeniorSelf). body에서 mission만
+           받는다. senior_id 소속이 아닌 mission을 보내면
+           ExerciseSessionStartSerializer.validate_mission이 400으로
+           거부한다 (URL이 아니라 body로 들어온 참조값의 유효성 문제라
+           403/404가 아닌 400을 택했다 - V6에서 URL 자체가 가리키는
            자원에 대한 권한 문제를 403/404로 구분한 것과는 다른 범주).
     """
-    permission_classes = (IsSeniorSelf,)
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsSeniorSelfOrMappedGuardian()]
+        return [IsSeniorSelf()]
 
     def get_queryset(self):
         return ExerciseSession.objects.filter(
@@ -413,14 +427,23 @@ class ExerciseSessionListCreateView(generics.ListCreateAPIView):
 class ExerciseSessionDetailView(generics.RetrieveUpdateAPIView):
     """
     GET   - 세션 상세 (연결된 pose_feedback 포함, ExerciseSessionDetailSerializer).
+            시니어 본인 또는 GuardianSeniorMap으로 연결된 보호자가 조회할
+            수 있다 (IsSeniorSelfOrMappedGuardian).
     PATCH - completion_rate/accuracy_avg 저장 (ExerciseSessionCompleteSerializer).
+            운동 수행 주체인 **시니어 본인만** 가능하다 (IsSeniorSelf).
     session_id가 URL의 senior_id 소속이 아니면 get_queryset() 필터링 때문에
-    조회되지 않아 404가 된다 (V6의 미션 PATCH와 동일한 기준).
+    조회되지 않아 404가 된다 (V6의 미션 PATCH와 동일한 기준). senior_id
+    스코프 자체에 대한 권한이 없으면(매핑 안 된 보호자·타 시니어) 그보다
+    먼저 403.
     """
-    permission_classes = (IsSeniorSelf,)
     lookup_field = 'pk'
     lookup_url_kwarg = 'session_id'
     http_method_names = ['get', 'patch']
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsSeniorSelfOrMappedGuardian()]
+        return [IsSeniorSelf()]
 
     def get_queryset(self):
         return ExerciseSession.objects.filter(
@@ -482,28 +505,38 @@ class ActivityLogListCreateView(generics.ListCreateAPIView):
     """
     기기 활동 로그(무활동 감지용) 저장/조회.
 
-    GET  - 이 시니어의 로그를 최신순으로 반환한다. 무활동 판정은 결국
-           "최근 일정 시간 안에 로그가 있는지"만 보는 용도라 전체 이력이
-           필요 없고, 로그가 계속 쌓이면 응답이 비대해진다. 그래서 파라미터가
-           없어도 기본 100건(최대 500건)으로 자르고, `?since=<ISO8601>`로
-           기간을, `?limit=<n>`으로 건수를 조절한다. 다른 목록 API와
+    GET  - 이 시니어의 로그를 최신순으로 반환한다. 시니어 본인 또는
+           GuardianSeniorMap으로 연결된 보호자가 조회할 수 있다
+           (IsSeniorSelfOrMappedGuardian) — 보호자 앱의 무활동 모니터링
+           화면에서 피보호자의 최근 활동을 봐야 하기 때문. 무활동 판정은
+           결국 "최근 일정 시간 안에 로그가 있는지"만 보는 용도라 전체
+           이력이 필요 없고, 로그가 계속 쌓이면 응답이 비대해진다. 그래서
+           파라미터가 없어도 기본 100건(최대 500건)으로 자르고,
+           `?since=<ISO8601>`로 기간을, `?limit=<n>`으로 건수를 조절한다. 다른 목록 API와
            마찬가지로 페이지네이션 래퍼 없이 평면 배열로 응답한다.
-    POST - 로그 저장. 기기가 화면 On/Off·터치·가속도 이벤트를 짧은 주기로
-           모아 보내는 특성상 단건(JSON object)과 여러 건(JSON array)을
-           모두 받는다(SessionFeedbackCreateView와 동일한 bulk 패턴).
-           senior는 URL의 senior_id 본인으로 강제 주입하고 activity_type만
-           신뢰한다(logged_at은 auto_now_add라 서버가 채운다).
+    POST - 로그 저장. **시니어 기기(본인)만** 기록한다 (IsSeniorSelf) —
+           로그를 만들어 보내는 주체는 시니어 기기뿐이라 보호자에게는
+           열지 않는다. 기기가 화면 On/Off·터치·가속도 이벤트를 짧은
+           주기로 모아 보내는 특성상 단건(JSON object)과 여러 건(JSON
+           array)을 모두 받는다(SessionFeedbackCreateView와 동일한 bulk
+           패턴). senior는 URL의 senior_id 본인으로 강제 주입하고
+           activity_type만 신뢰한다(logged_at은 auto_now_add라 서버가 채운다).
 
-    senior_id 자체가 본인이 아니면 IsSeniorSelf가 403으로 먼저 막고,
-    get_queryset도 senior_id로 필터링해 타인 로그가 섞이지 않게 한다.
-    bulk_create라 MySQL에서는 POST 응답의 log_id가 채워지지 않을 수 있다
-    (기기가 로그를 fire-and-forget로 보내는 용도라 ID 회신이 불필요).
+    senior_id 스코프에 대한 권한이 없으면(GET은 매핑 안 된 보호자·타
+    시니어, POST는 본인이 아닌 누구든) 403으로 먼저 막고, get_queryset도
+    senior_id로 필터링해 타인 로그가 섞이지 않게 한다. bulk_create라
+    MySQL에서는 POST 응답의 log_id가 채워지지 않을 수 있다 (기기가 로그를
+    fire-and-forget로 보내는 용도라 ID 회신이 불필요).
     """
-    permission_classes = (IsSeniorSelf,)
     serializer_class = ActivityLogSerializer
 
     DEFAULT_LIMIT = 100
     MAX_LIMIT = 500
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsSeniorSelfOrMappedGuardian()]
+        return [IsSeniorSelf()]
 
     def _limit(self):
         raw = self.request.query_params.get('limit')

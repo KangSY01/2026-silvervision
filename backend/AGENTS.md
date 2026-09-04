@@ -43,7 +43,8 @@
 - `api/authentication.py`의 **`RoleBasedJWTAuthentication`**(`JWTAuthentication` 서브클래스)가 `settings.REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES']`에 등록돼 있고, 토큰의 `role` 클레임으로 `Senior`/`Guardian` 중 조회할 모델을 정해 `request.user`에 담는다.
 - **토큰 재발급(`POST /auth/token/refresh/`)**: simplejwt 5.5의 내장 `TokenRefreshSerializer`는 refresh token의 `user_id` 클레임(= `USER_ID_CLAIM` 기본값 `"user_id"`, `_issue_tokens`가 심는 커스텀 클레임과 이름이 겹침)으로 `AUTH_USER_MODEL`을 무조건 조회하는데, 이 프로젝트는 Senior/Guardian을 `AUTH_USER_MODEL`로 통합하지 않아 항상 `User.DoesNotExist`로 터진다. 그래서 사용자 모델 조회를 걷어낸 커스텀 `TokenRefreshSerializer`(`api/serializers.py`)로 교체했다 — 토큰 서명·만료·blacklist 검증만 하고, `no_copy_claims`(token_type/exp/jti/iat) 외 커스텀 클레임(role/user_id)은 simplejwt가 새 access token으로 복사한다. `ROTATE_REFRESH_TOKENS`는 기본값(False)이라 응답은 `{access}`만. 뷰(`TokenRefreshView`)는 내장 뷰 골격을 재사용하되 만료·위조·blacklist 토큰 에러를 `{'detail': 한국어}` 401로 정규화한다.
 - **로그아웃(`POST /auth/logout/`)**: 클라이언트 로컬 삭제(`clearSession`)만으로 끝내지 않고 서버에서 refresh token을 blacklist해 실제로 무효화한다 — 응급 상황에서 보호자에게 카메라/GPS를 여는 서비스라 탈취된 refresh token(기본 수명 1일, rotation 미설정)이 로그아웃 후에도 access token을 계속 찍어내면 위험하다는 판단. `token_blacklist` 앱 + `migrate` 한 번이 비용의 전부. 권한 `AllowAny`(만료된 access로도 로그아웃 가능해야 하고 body의 refresh token 자체가 소유 증명), 이미 무효인 토큰도 205로 멱등 통과. 한계: blacklist는 refresh token만 걸리고 직전 발급된 access token은 남은 수명(기본 5분)동안 유효하다.
-- `api/permissions.py`: **`IsSenior`/`IsGuardian`**(타입 확인), **`IsOwnerSelf`**(URL `{id}` == 토큰 본인, IDOR 방지) + 서브클래스 **`IsSeniorSelf`/`IsGuardianSelf`**, **`IsSeniorOrGuardian`**(로그인 여부만). `IsOwnerSelf` 계열은 프로필·미션·세션·보호자매핑 뷰에서 재사용 중이다. `senior_id`가 URL에 없는 응급 엔드포인트는 `IsSeniorOrGuardian` + 각 뷰 `get_queryset()`의 `_visible_emergency_events`(본인 소유 또는 `GuardianSeniorMap` 연결 보호자) 필터로 권한을 처리한다.
+- `api/permissions.py`: **`IsSenior`/`IsGuardian`**(타입 확인), **`IsOwnerSelf`**(URL `{id}` == 토큰 본인, IDOR 방지) + 서브클래스 **`IsSeniorSelf`/`IsGuardianSelf`**, **`IsSeniorOrGuardian`**(로그인 여부만), **`IsSeniorSelfOrMappedGuardian`**(URL `senior_id` 본인 **또는** 그 시니어와 `GuardianSeniorMap`으로 연결된 보호자). `IsOwnerSelf` 계열은 프로필·미션·세션 쓰기·보호자매핑 뷰에서 재사용 중이다. `senior_id`가 URL에 없는 응급 엔드포인트는 `IsSeniorOrGuardian` + 각 뷰 `get_queryset()`의 `_visible_emergency_events`(본인 소유 또는 `GuardianSeniorMap` 연결 보호자) 필터로 권한을 처리한다.
+- **세션 목록/상세·활동 로그의 조회(GET)는 매핑된 보호자에게도 열려 있다** — `IsSeniorSelfOrMappedGuardian`을 GET에만 물리고(각 뷰 `get_permissions()`), 쓰기(POST 세션 시작·활동로그 기록, PATCH 세션 완료)는 `IsSeniorSelf`로 시니어 본인만 유지한다. 응급 배치와 같은 "본인 또는 매핑된 보호자" 가시성 기준이되, 매핑 안 된 보호자·타 시니어는 **403**(스코프 권한은 permission 계층이, 스코프 안 하위 리소스 존재 여부는 `get_queryset()`이 404로 — 계층 분리). 응급 이벤트가 404로 통일한 건 URL에 `senior_id`가 없어 대조할 스코프가 없었기 때문이라 여기선 재현하지 않는다.
 
 ### 엔드포인트 (섹션별 구현 현황)
 
@@ -60,10 +61,10 @@
 | **운동** | GET | `exercises/`, `exercises/{exercise_id}/` | IsAuthenticated |
 | | GET·POST | `senior/{senior_id}/missions/` | `IsSeniorSelf` |
 | | PATCH | `senior/{senior_id}/missions/{mission_id}/` — status만 | `IsSeniorSelf` |
-| **기록** | GET·POST | `senior/{senior_id}/sessions/` — 목록 / 세션 시작 | `IsSeniorSelf` |
-| | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` — GET은 `pose_feedback` nested / PATCH는 `completion_rate`·`accuracy_avg`(완료 시 fruit/ranking 갱신 트리거) | `IsSeniorSelf` |
+| **기록** | GET·POST | `senior/{senior_id}/sessions/` — 목록 / 세션 시작 | GET `IsSeniorSelfOrMappedGuardian` / POST `IsSeniorSelf` |
+| | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` — GET은 `pose_feedback` nested / PATCH는 `completion_rate`·`accuracy_avg`(완료 시 fruit/ranking 갱신 트리거) | GET `IsSeniorSelfOrMappedGuardian` / PATCH `IsSeniorSelf` |
 | | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` — bulk 저장 | `IsSeniorSelf` |
-| | GET·POST | `senior/{senior_id}/activity-log/` — 기기 활동 로그. GET 최신순(기본 100·최대 500건, `?limit`/`?since`), POST 단건·bulk | `IsSeniorSelf` |
+| | GET·POST | `senior/{senior_id}/activity-log/` — 기기 활동 로그. GET 최신순(기본 100·최대 500건, `?limit`/`?since`), POST 단건·bulk | GET `IsSeniorSelfOrMappedGuardian` / POST `IsSeniorSelf` |
 | | GET·POST | `senior/{senior_id}/ability-log/` — 장기 신체 능력(일별). GET `logged_date` 오름차순 전체, POST는 `(senior, logged_date)` upsert(신규 201 / 갱신 200) | `IsSeniorSelf` |
 | **응급** | GET·POST | `emergency/` — GET은 `IsSeniorOrGuardian` + `_visible_emergency_events`, POST는 `IsSenior`(시니어 본인만 생성) | (method별) |
 | | GET·PATCH | `emergency/{event_id}/` — GET은 `emergency_notification`·`camera_access_grant` nested / PATCH는 status 전이(`notified` 제외) | `IsSeniorOrGuardian` + `_visible_emergency_events` |
@@ -88,7 +89,7 @@
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) 테스트 61건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) 테스트 70건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 

@@ -206,6 +206,12 @@ class ExerciseSessionReadTests(ApiTestBase):
         PoseFeedback.objects.create(
             session=self.session, joint_name='right_knee', deviation='1.20',
         )
+        self.mapped_guardian = self.make_guardian('g1')
+        self.unmapped_guardian = self.make_guardian('g2')
+        GuardianSeniorMap.objects.create(
+            guardian=self.mapped_guardian, senior=self.senior,
+            registered_via='id_search',
+        )
         self.list_url = f'/api/v1/senior/{self.senior.senior_id}/sessions/'
         self.detail_url = f'{self.list_url}{self.session.session_id}/'
 
@@ -249,6 +255,47 @@ class ExerciseSessionReadTests(ApiTestBase):
             self.list_url, {'mission': mission.mission_id}, format='json',
         )
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+    def test_mapped_guardian_can_read_list(self):
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.get(self.list_url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]['session_id'], self.session.session_id)
+
+    def test_mapped_guardian_can_read_detail(self):
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.get(self.detail_url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data['pose_feedbacks']), 2)
+
+    def test_unmapped_guardian_list_forbidden(self):
+        self.auth('guardian', self.unmapped_guardian.guardian_id)
+        res = self.client.get(self.list_url)
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unmapped_guardian_detail_forbidden(self):
+        self.auth('guardian', self.unmapped_guardian.guardian_id)
+        res = self.client.get(self.detail_url)
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_mapped_guardian_cannot_start_session(self):
+        mission = ExerciseMission.objects.create(
+            senior=self.senior, exercise=self.exercise,
+            scheduled_at=timezone.now(),
+        )
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.post(
+            self.list_url, {'mission': mission.mission_id}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_mapped_guardian_cannot_patch_session(self):
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.patch(
+            self.detail_url, {'completion_rate': '80.00'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class EmergencyEventReadTests(ApiTestBase):
@@ -479,6 +526,12 @@ class ActivityLogTests(ApiTestBase):
     def setUp(self):
         self.senior = self.make_senior('senior1', 'BARCODE-1')
         self.other = self.make_senior('senior2', 'BARCODE-2')
+        self.mapped_guardian = self.make_guardian('g1')
+        self.unmapped_guardian = self.make_guardian('g2')
+        GuardianSeniorMap.objects.create(
+            guardian=self.mapped_guardian, senior=self.senior,
+            registered_via='id_search',
+        )
         self.url = f'/api/v1/senior/{self.senior.senior_id}/activity-log/'
 
     def _backdate(self, log, **delta):
@@ -605,6 +658,30 @@ class ActivityLogTests(ApiTestBase):
             ).status_code,
             status.HTTP_403_FORBIDDEN,
         )
+
+    def test_mapped_guardian_can_read_logs(self):
+        ActivityLog.objects.create(
+            senior=self.senior, activity_type='screen_on',
+        )
+        ActivityLog.objects.create(senior=self.other, activity_type='touch')
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]['activity_type'], 'screen_on')
+
+    def test_unmapped_guardian_read_forbidden(self):
+        self.auth('guardian', self.unmapped_guardian.guardian_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_mapped_guardian_cannot_post_logs(self):
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.post(
+            self.url, {'activity_type': 'touch'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(ActivityLog.objects.exists())
 
     def test_requires_auth(self):
         self.logout()
