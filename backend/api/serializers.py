@@ -153,9 +153,9 @@ class LogoutSerializer(serializers.Serializer):
 class MappedSeniorSerializer(serializers.ModelSerializer):
     """
     보호자-피보호자 매핑 목록에서 각 피보호자를 식별할 최소 정보만 노출한다.
-    보호자는 `/senior/{id}/`(IsSeniorSelf)로 피보호자 프로필을 받을 수 없어
-    이 요약이 보호자 쪽에서 피보호자 정보를 얻는 유일한 경로지만, 질환·
-    복용약 같은 민감 정보는 목록 용도에 불필요하므로 제외한다.
+    질환·복용약·주소 같은 민감 정보는 목록 용도에 불필요하므로 제외한다 -
+    보호자가 그 상세가 필요하면 `GET /senior/{id}/`
+    (IsSeniorSelfOrMappedGuardian, 매핑된 보호자 GET 허용)로 별도 조회한다.
     """
     class Meta:
         model = Senior

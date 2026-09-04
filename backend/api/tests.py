@@ -193,6 +193,82 @@ class GuardianSeniorMapTests(ApiTestBase):
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
+class SeniorProfileAccessTests(ApiTestBase):
+    """GET /senior/{id}/ 는 본인 + 매핑된 보호자, PUT/PATCH 는 본인만."""
+
+    def setUp(self):
+        self.senior = self.make_senior(
+            'senior1', 'BARCODE-1', name='김철수', address='서울시 종로구',
+        )
+        self.other_senior = self.make_senior('senior2', 'BARCODE-2')
+        self.mapped_guardian = self.make_guardian('g1')
+        self.unmapped_guardian = self.make_guardian('g2')
+        GuardianSeniorMap.objects.create(
+            guardian=self.mapped_guardian, senior=self.senior,
+            registered_via='id_search',
+        )
+        self.url = f'/api/v1/senior/{self.senior.senior_id}/'
+
+    def test_owner_can_read(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['name'], '김철수')
+
+    def test_mapped_guardian_can_read_full_profile(self):
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        # 보호자도 질환·주소·복용약을 포함한 전체 프로필을 받는다
+        # (SeniorDetailScreen 설계).
+        self.assertIn('diseases', res.data)
+        self.assertIn('medication', res.data)
+        self.assertEqual(res.data['address'], '서울시 종로구')
+        # password_hash 는 시리얼라이저 fields 에 없어 절대 노출되지 않는다.
+        self.assertNotIn('password_hash', res.data)
+        self.assertNotIn('password', res.data)
+
+    def test_unmapped_guardian_forbidden(self):
+        self.auth('guardian', self.unmapped_guardian.guardian_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_senior_forbidden(self):
+        self.auth('senior', self.other_senior.senior_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_requires_auth(self):
+        self.logout()
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_owner_can_update(self):
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.patch(self.url, {'phone': '01099998888'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.senior.refresh_from_db()
+        self.assertEqual(self.senior.phone, '01099998888')
+
+    def test_mapped_guardian_cannot_update(self):
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.patch(self.url, {'phone': '01000000000'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_mapped_guardian_cannot_put(self):
+        self.auth('guardian', self.mapped_guardian.guardian_id)
+        res = self.client.put(
+            self.url,
+            {
+                'login_id': 'hacked', 'name': '해킹', 'phone': '01000000000',
+                'address': 'x', 'diseases': '', 'medication': '',
+                'mobility_level': 'independent',
+            },
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+
 class ExerciseSessionReadTests(ApiTestBase):
     def setUp(self):
         self.exercise = self.make_exercise()

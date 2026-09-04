@@ -18,12 +18,13 @@ class IsOwnerSelf(BasePermission):
     URL의 {id}와 토큰 소유자 본인이 일치할 때만 허용하는 공통 로직
     (IDOR 방지, claude-security-guidance.md). 뷰마다 "본인 확인" if문을
     반복하지 않도록 재사용 가능한 permission으로 만들었다 - 현재
-    `IsSeniorSelf`는 시니어 프로필 / 미션 목록·생성·상태변경 / 세션
-    시작(POST)·완료(PATCH) / 세션 피드백·활동로그·신체능력로그 쓰기
-    뷰에서, `IsGuardianSelf`는 보호자 프로필 / 보호자-피보호자 매핑
-    목록·등록·해제 뷰에서 쓰인다. 세션 목록/상세·활동로그의 **조회
-    (GET)**는 매핑된 보호자도 봐야 해서 `IsSeniorSelfOrMappedGuardian`
-    으로 넘어갔다 (본인 확인 로직 자체는 동일하게 재사용).
+    `IsSeniorSelf`는 시니어 프로필 수정(PUT/PATCH) / 미션 목록·생성·상태
+    변경 / 세션 시작(POST)·완료(PATCH) / 세션 피드백·활동로그·신체능력
+    로그 쓰기 뷰에서, `IsGuardianSelf`는 보호자 프로필 / 보호자-피보호자
+    매핑 목록·등록·해제 뷰에서 쓰인다. 시니어 프로필·세션 목록/상세·
+    활동로그의 **조회(GET)**는 매핑된 보호자도 봐야 해서
+    `IsSeniorSelfOrMappedGuardian`으로 넘어갔다 (본인 확인 로직 자체는
+    동일하게 재사용).
 
     model/url_kwarg/user_pk_attr을 서브클래스에서 지정한다.
     """
@@ -56,10 +57,11 @@ class IsSeniorSelfOrMappedGuardian(BasePermission):
     `GuardianSeniorMap`으로 그 시니어와 연결된 보호자일 때만 허용한다.
     응급 이벤트의 `_visible_emergency_events`가 쓰는 "본인 소유 또는 매핑된
     보호자" 가시성 기준을, `senior_id`가 URL에 있는 **조회(GET) 전용**
-    엔드포인트(세션 목록/상세, 활동 로그 조회)에 적용하기 위한
-    permission이다. 쓰기(POST 세션 시작·활동로그 기록, PATCH 세션 완료)는
-    시니어 본인만 가능해야 하므로 각 뷰의 `get_permissions()`가 GET에만
-    이 클래스를, 그 외 메서드에는 `IsSeniorSelf`를 물린다.
+    엔드포인트(시니어 프로필, 세션 목록/상세, 활동 로그 조회)에 적용하기
+    위한 permission이다. 쓰기(프로필 PUT/PATCH, POST 세션 시작·활동로그
+    기록, PATCH 세션 완료)는 시니어 본인만 가능해야 하므로 각 뷰의
+    `get_permissions()`가 GET에만 이 클래스를, 그 외 메서드에는
+    `IsSeniorSelf`를 물린다.
 
     **매핑 안 된 보호자·타 시니어는 403** (`IsSeniorSelf`가 wrong senior에
     403을 주던 것과 동일). `senior_id` 스코프에 대한 접근 권한 판단은

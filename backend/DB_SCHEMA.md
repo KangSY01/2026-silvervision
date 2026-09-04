@@ -216,6 +216,7 @@
 - `/auth/guardian/register/`, `/auth/guardian/login/` → `guardian`
 - `POST /auth/token/refresh/` (access token 재발급), `POST /auth/logout/` (refresh token 무효화) — (2026-09-02 구현). 이 스키마의 13개 테이블과 무관하며, 로그아웃 blacklist용으로 `rest_framework_simplejwt.token_blacklist` 앱이 자체 테이블 2개(`token_blacklist_outstandingtoken`, `token_blacklist_blacklistedtoken`)를 추가한다(라이브러리 관리, `migrate`만 필요). 상세 근거는 AGENTS.md 5장 "인증/권한".
 - `/senior/{id}/`, `/guardian/{id}/` (조회/수정) → `senior`, `guardian`
+  - **`GET /senior/{id}/` 권한 (2026-09-04 확장)**: `IsSeniorSelfOrMappedGuardian` — 시니어 본인 또는 `guardian_senior_map`으로 연결된 보호자. 보호자 피보호자 상세 화면(`SeniorDetailScreen`)이 질환·주소·복용약을 표시하도록 설계돼 있어 `SeniorProfileSerializer` 전체를 그대로 내려준다(`password_hash`는 시리얼라이저 `fields`에 없어 미노출). `PUT/PATCH`(프로필 수정)는 `IsSeniorSelf` 유지 — 보호자는 수정 불가. 매핑 안 된 보호자·타 시니어는 403(세션·활동로그 엔드포인트와 동일 기준).
 - `/guardian/{id}/seniors/` (GET 목록 / POST 등록), `.../seniors/{senior_id}/` (DELETE 해제) → `guardian_senior_map`
   - (2026-09-02 구현) POST body는 `registered_via` + (`login_id` | `barcode_code`)이며, 두 값 모두 `senior` 테이블에 UNIQUE라 **서버가 senior를 조회**한다 (클라이언트가 senior_id를 직접 보내지 않음 → `registered_via`가 실제 조회 경로를 정확히 반영). `(guardian, senior)` UNIQUE 위반(중복 등록)은 **409**, 존재하지 않는 식별자는 **404**. 승인 절차는 스키마·화면에 없어 등록 즉시 연결된다.
 - `/senior/{id}/missions/`, `.../missions/{mission_id}/` → `exercise_mission`

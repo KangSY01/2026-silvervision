@@ -215,17 +215,29 @@ class LogoutView(APIView):
 
 class SeniorDetailView(generics.RetrieveUpdateAPIView):
     """
-    본인 프로필 조회/수정. IsSeniorSelf가 role(Senior)과 URL의
-    senior_id가 토큰 본인과 일치하는지 함께 검증하므로, 다른 시니어의
-    id로 접근하면 403(권한 있음/본인 아님)으로 거부된다. 토큰 자체가
-    없거나 유효하지 않으면 DRF가 자동으로 401을 반환한다(인증 실패와
-    권한 거부를 구분하는 표준 동작).
+    시니어 프로필 조회/수정.
+
+    - **GET**: 시니어 본인 또는 GuardianSeniorMap으로 연결된 보호자
+      (IsSeniorSelfOrMappedGuardian). 보호자 앱의 피보호자 상세 화면
+      (SeniorDetailScreen)이 질환·주소·복용약을 보여주도록 설계돼 있어
+      SeniorProfileSerializer 전체를 그대로 내려준다 - password_hash는
+      시리얼라이저 fields에 없어 애초에 노출되지 않는다.
+    - **PUT/PATCH**: 시니어 본인만 (IsSeniorSelf). 보호자는 피보호자
+      프로필을 수정할 수 없다.
+
+    매핑 안 된 보호자·다른 시니어가 접근하면 403(권한 계층에서 거부,
+    세션/활동로그 엔드포인트와 동일 기준). 토큰이 없거나 유효하지 않으면
+    DRF가 401을 반환한다.
     """
     queryset = Senior.objects.all()
     serializer_class = SeniorProfileSerializer
-    permission_classes = (IsSeniorSelf,)
     lookup_field = 'pk'
     lookup_url_kwarg = 'senior_id'
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsSeniorSelfOrMappedGuardian()]
+        return [IsSeniorSelf()]
 
 
 class GuardianDetailView(generics.RetrieveUpdateAPIView):
