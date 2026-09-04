@@ -48,6 +48,29 @@ export function canResolveAlert(status: EmergencyStatus): boolean {
   return RESOLVABLE_FROM.has(status);
 }
 
+// 보호자 화면의 "미확인 알림 있음" 신호(벨 아이콘 빨간 점 등)에 쓴다.
+// 전이 그래프상 notified 는 "보호자에게 알림이 전송됐고 아직 종결(resolved)
+// 되지 않은" 유일한 상태 - detected/first_check 는 기기·1차 확인 단계라 아직
+// 보호자 개입 대상이 아니고, false_alarm/resolved 는 이미 판정이 끝났다.
+export function isNotifiedAlert(status: EmergencyStatus): boolean {
+  return status === 'notified';
+}
+
+// senior별 "낙상 의심(대응 진행 중)" 판정. event_type이 fall 이면서 아직
+// 종결되지 않은(false_alarm/resolved 아님) 이벤트가 하나라도 있으면 true.
+// 종결된 과거 낙상까지 위험으로 표시하면 카드가 영구히 빨갛게 남으므로 제외한다.
+export function hasActiveFallAlert(
+  events: readonly { senior: number; event_type: EmergencyEventType; status: EmergencyStatus }[],
+  seniorId: number,
+): boolean {
+  return events.some(
+    (event) =>
+      event.senior === seniorId &&
+      event.event_type === 'fall' &&
+      !isAlertClosed(event.status),
+  );
+}
+
 // created_at(ISO) → "2026. 09. 03 10:15" 형태. 파싱 실패 시 원문을 그대로 반환.
 export function formatEmergencyTimestamp(iso: string): string {
   const date = new Date(iso);

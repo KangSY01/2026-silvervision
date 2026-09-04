@@ -116,6 +116,20 @@ export interface ExerciseSessionResponse {
 }
 
 /**
+ * backend/api/serializers.py의 ActivityLogSerializer 응답 형태
+ * (GET /senior/{id}/activity-log/). 기기가 보낸 화면 On/Off·터치·가속도 등
+ * 활동 이벤트 한 건. activity_type은 백엔드가 choices로 잠그지 않은 자유
+ * 문자열이라(센서 추가에 따라 늘 수 있음) string으로 둔다. logged_at은
+ * auto_now_add(서버 기록 시각).
+ */
+export interface ActivityLogResponse {
+  log_id: number;
+  senior: number;
+  activity_type: string;
+  logged_at: string;
+}
+
+/**
  * backend/api/serializers.py의 MappedSeniorSerializer 형태
  * (GuardianSeniorMapSerializer.senior에 중첩). 보호자 쪽에서 피보호자를 식별할
  * 최소 정보만 담기며, 질환·복용약 등 민감 정보는 빠져 있다.
