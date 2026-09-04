@@ -10,6 +10,7 @@ import {
   SeniorProfileResponse,
 } from '../../api/client';
 import { useAppState } from '../../context/AppStateContext';
+import { MOBILITY_LEVEL_TO_ACTIVITY_LEVEL } from '../../labels';
 import {
   colors,
   fontSizes,
@@ -18,17 +19,7 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
-import { ActivityLevel, UserProfile } from '../../types';
-
-// SeniorProfileResponse.mobility_level(백엔드 enum) -> ActivityLevel(화면 표시용 한글 라벨)
-const MOBILITY_LEVEL_TO_ACTIVITY_LEVEL: Record<
-  SeniorProfileResponse['mobility_level'],
-  ActivityLevel
-> = {
-  independent: '독립',
-  partial_assist: '부분 보조',
-  full_assist: '완전 보조',
-};
+import { UserProfile } from '../../types';
 
 export default function LoginScreen() {
   const navigation = useNavigation();
