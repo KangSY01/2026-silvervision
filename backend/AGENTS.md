@@ -40,6 +40,10 @@
 ### 인증 / 권한 (구현 완료)
 
 - `Senior`/`Guardian`은 독립된 두 로그인 주체라 `AUTH_USER_MODEL`로 통합하지 않고 각각 일반 모델 + `set_password`/`check_password`(Django hasher)로 처리한다. JWT는 로그인 뷰(`views._issue_tokens`)에서 직접 발급하며 `role: senior|guardian` + `user_id` 커스텀 클레임을 담는다.
+- **회원가입 비밀번호 규칙은 역할별로 다르다** (등록 시리얼라이저에서만 검증 — 로그인은 `check_password` 해시 비교만 하므로 규칙과 무관):
+  - **시니어(`SeniorRegisterSerializer`)**: **정확히 4자리 숫자(0-9)**. 시니어 접근성을 위해 로그인 화면(`frontend` `LoginScreen`)이 "숫자 4자리 PIN" UX로 고정 설계돼 있고, 그 화면 문구가 단일 소스라 "4자리 이상"으로 여지를 두면 시니어가 5자리로 등록해 두고 4자리 화면에서 혼란을 겪을 수 있어 정확히 4자리만 허용한다. 에러 메시지 `"비밀번호는 숫자 4자리로 입력해 주세요."`.
+  - **보호자(`GuardianRegisterSerializer`)**: 기존 규칙 유지 — **8자 이상 + 영문·숫자 조합 필수**(`min_length=8` + `validate_password`가 `isdigit()`/`isalpha()` 단일 종류 거부). 보호자는 일반 성인 UX라 완화하지 않는다.
+  - 4자리 숫자 PIN은 엔트로피가 낮으므로(10^4), 이후 강화가 필요하면 PIN 규칙을 되돌리는 대신 로그인 rate limit·계정 잠금을 별도로 도입한다.
 - `api/authentication.py`의 **`RoleBasedJWTAuthentication`**(`JWTAuthentication` 서브클래스)가 `settings.REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES']`에 등록돼 있고, 토큰의 `role` 클레임으로 `Senior`/`Guardian` 중 조회할 모델을 정해 `request.user`에 담는다.
 - **토큰 재발급(`POST /auth/token/refresh/`)**: simplejwt 5.5의 내장 `TokenRefreshSerializer`는 refresh token의 `user_id` 클레임(= `USER_ID_CLAIM` 기본값 `"user_id"`, `_issue_tokens`가 심는 커스텀 클레임과 이름이 겹침)으로 `AUTH_USER_MODEL`을 무조건 조회하는데, 이 프로젝트는 Senior/Guardian을 `AUTH_USER_MODEL`로 통합하지 않아 항상 `User.DoesNotExist`로 터진다. 그래서 사용자 모델 조회를 걷어낸 커스텀 `TokenRefreshSerializer`(`api/serializers.py`)로 교체했다 — 토큰 서명·만료·blacklist 검증만 하고, `no_copy_claims`(token_type/exp/jti/iat) 외 커스텀 클레임(role/user_id)은 simplejwt가 새 access token으로 복사한다. `ROTATE_REFRESH_TOKENS`는 기본값(False)이라 응답은 `{access}`만. 뷰(`TokenRefreshView`)는 내장 뷰 골격을 재사용하되 만료·위조·blacklist 토큰 에러를 `{'detail': 한국어}` 401로 정규화한다.
 - **로그아웃(`POST /auth/logout/`)**: 클라이언트 로컬 삭제(`clearSession`)만으로 끝내지 않고 서버에서 refresh token을 blacklist해 실제로 무효화한다 — 응급 상황에서 보호자에게 카메라/GPS를 여는 서비스라 탈취된 refresh token(기본 수명 1일, rotation 미설정)이 로그아웃 후에도 access token을 계속 찍어내면 위험하다는 판단. `token_blacklist` 앱 + `migrate` 한 번이 비용의 전부. 권한 `AllowAny`(만료된 access로도 로그아웃 가능해야 하고 body의 refresh token 자체가 소유 증명), 이미 무효인 토큰도 205로 멱등 통과. 한계: blacklist는 refresh token만 걸리고 직전 발급된 access token은 남은 수명(기본 5분)동안 유효하다.
@@ -90,7 +94,7 @@
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) 테스트 78건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) 테스트 82건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 

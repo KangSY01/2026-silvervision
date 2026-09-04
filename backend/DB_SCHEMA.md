@@ -214,6 +214,7 @@
 **구현 완료**
 - `/auth/senior/register/`, `/auth/senior/login/` → `senior`
 - `/auth/guardian/register/`, `/auth/guardian/login/` → `guardian`
+- **회원가입 비밀번호 규칙이 역할별로 다름** (2026-09-04): 시니어는 **정확히 4자리 숫자 PIN**(접근성 — 로그인 화면이 "숫자 4자리" UX로 고정), 보호자는 **8자 이상 영문+숫자 조합**(일반 성인 UX). 등록 시리얼라이저(`SeniorRegisterSerializer`/`GuardianRegisterSerializer`)에서만 검증하고, `password_hash`는 Django hasher로 저장, 로그인은 `check_password` 해시 비교라 규칙과 무관. 상세 근거는 AGENTS.md "인증/권한".
 - `POST /auth/token/refresh/` (access token 재발급), `POST /auth/logout/` (refresh token 무효화) — (2026-09-02 구현). 이 스키마의 13개 테이블과 무관하며, 로그아웃 blacklist용으로 `rest_framework_simplejwt.token_blacklist` 앱이 자체 테이블 2개(`token_blacklist_outstandingtoken`, `token_blacklist_blacklistedtoken`)를 추가한다(라이브러리 관리, `migrate`만 필요). 상세 근거는 AGENTS.md 5장 "인증/권한".
 - `/senior/{id}/`, `/guardian/{id}/` (조회/수정) → `senior`, `guardian`
   - **`GET /senior/{id}/` 권한 (2026-09-04 확장)**: `IsSeniorSelfOrMappedGuardian` — 시니어 본인 또는 `guardian_senior_map`으로 연결된 보호자. 보호자 피보호자 상세 화면(`SeniorDetailScreen`)이 질환·주소·복용약을 표시하도록 설계돼 있어 `SeniorProfileSerializer` 전체를 그대로 내려준다(`password_hash`는 시리얼라이저 `fields`에 없어 미노출). `PUT/PATCH`(프로필 수정)는 `IsSeniorSelf` 유지 — 보호자는 수정 불가. 매핑 안 된 보호자·타 시니어는 403(세션·활동로그 엔드포인트와 동일 기준).

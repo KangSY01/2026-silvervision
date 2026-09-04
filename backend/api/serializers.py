@@ -41,7 +41,7 @@ def _generate_barcode_code():
 
 
 class SeniorRegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
+    password = serializers.CharField(write_only=True)
 
     class Meta:
         model = Senior
@@ -51,10 +51,13 @@ class SeniorRegisterSerializer(serializers.ModelSerializer):
         )
 
     def validate_password(self, value):
-        if value.isdigit() or value.isalpha():
-            raise serializers.ValidationError(
-                '비밀번호는 영문과 숫자를 함께 포함해야 합니다.'
-            )
+        # 시니어 계정은 접근성을 위해 로그인 UX가 "숫자 4자리 PIN"으로
+        # 고정돼 있다(LoginScreen). 화면 문구가 단일 소스라 "4자리 이상"으로
+        # 여지를 두면 시니어가 5자리로 등록해 놓고 4자리 화면에서 헷갈릴 수
+        # 있어 정확히 4자리만 허용한다. 보호자(GuardianRegisterSerializer)는
+        # 일반 성인 UX라 8자 이상 영문+숫자 규칙을 그대로 둔다.
+        if len(value) != 4 or not (value.isascii() and value.isdigit()):
+            raise serializers.ValidationError('비밀번호는 숫자 4자리로 입력해 주세요.')
         return value
 
     def create(self, validated_data):

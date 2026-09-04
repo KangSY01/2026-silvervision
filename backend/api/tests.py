@@ -949,3 +949,74 @@ class TokenRefreshLogoutTests(ApiTestBase):
             self.logout_url, {'refresh': 'garbage'}, format='json',
         )
         self.assertEqual(res.status_code, status.HTTP_205_RESET_CONTENT)
+
+
+class RegisterPasswordRuleTests(ApiTestBase):
+    """
+    시니어 계정은 접근성을 위해 4자리 숫자 PIN, 보호자는 일반 비밀번호
+    규칙(8자 이상 영문+숫자). 로그인은 check_password 해시 비교만 하므로
+    등록 규칙만 역할별로 다르다.
+    """
+
+    senior_url = '/api/v1/auth/senior/register/'
+    guardian_url = '/api/v1/auth/guardian/register/'
+
+    def _senior_payload(self, password):
+        return {
+            'login_id': 'pin-senior', 'password': password, 'name': '김노인',
+            'phone': '01012345678', 'address': '서울시', 'mobility_level': 'independent',
+        }
+
+    def _guardian_payload(self, password):
+        return {
+            'login_id': 'pw-guardian', 'password': password, 'name': '박보호',
+            'phone': '01012345678', 'address': '서울시',
+        }
+
+    def test_senior_register_accepts_4_digit_pin(self):
+        res = self.client.post(self.senior_url, self._senior_payload('1234'), format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        senior = Senior.objects.get(login_id='pin-senior')
+        # 저장은 해시로, 로그인은 그 PIN으로 통과해야 한다.
+        self.assertTrue(senior.check_password('1234'))
+        self.assertNotEqual(senior.password_hash, '1234')
+        login = self.client.post(
+            '/api/v1/auth/senior/login/',
+            {'login_id': 'pin-senior', 'password': '1234'}, format='json',
+        )
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+
+    def test_senior_register_rejects_non_4_digit(self):
+        for bad in ['123', '12345', '12a4', 'abcd', '', '12 4', '١٢٣٤']:
+            res = self.client.post(
+                self.senior_url, self._senior_payload(bad), format='json',
+            )
+            self.assertEqual(
+                res.status_code, status.HTTP_400_BAD_REQUEST, msg=f'{bad!r} 허용됨',
+            )
+            self.assertIn('password', res.data)
+        self.assertFalse(Senior.objects.filter(login_id='pin-senior').exists())
+
+    def test_senior_register_rejects_old_mixed_rule_password(self):
+        # 이전 규칙(8자 영문+숫자)에 맞던 값은 이제 시니어 등록에서 거부된다.
+        res = self.client.post(
+            self.senior_url, self._senior_payload('abcd1234'), format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_guardian_register_keeps_strict_rule(self):
+        # 4자리 숫자는 보호자에겐 여전히 거부(8자 미만 + 숫자만).
+        weak = self.client.post(
+            self.guardian_url, self._guardian_payload('1234'), format='json',
+        )
+        self.assertEqual(weak.status_code, status.HTTP_400_BAD_REQUEST)
+        # 숫자만 8자도 거부(영문+숫자 조합 필수).
+        digits_only = self.client.post(
+            self.guardian_url, self._guardian_payload('12345678'), format='json',
+        )
+        self.assertEqual(digits_only.status_code, status.HTTP_400_BAD_REQUEST)
+        # 8자 이상 영문+숫자는 통과.
+        ok = self.client.post(
+            self.guardian_url, self._guardian_payload('abcd1234'), format='json',
+        )
+        self.assertEqual(ok.status_code, status.HTTP_201_CREATED)
