@@ -3,6 +3,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Info, KeyRound, MapPin, Phone, Smile, User } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  apiClient,
+  getRegisterErrorMessage,
+  GuardianProfileResponse,
+  LoginTokenResponse,
+  persistSessionFromLoginResponse,
+} from '../../api/client';
 import { useAppState } from '../../context/AppStateContext';
 import {
   colors,
@@ -16,30 +23,81 @@ import { Guardian } from '../../types';
 
 export default function GuardianSignupScreen() {
   const navigation = useNavigation();
-  const { guardianProfile, setGuardianProfile } = useAppState();
-  const [name, setName] = useState(guardianProfile.name || '박보호');
-  const [id, setId] = useState(guardianProfile.id || 'guardian1');
-  const [pw, setPw] = useState(guardianProfile.pw || '1234');
-  const [phone, setPhone] = useState(guardianProfile.phone || '010-9999-1234');
+  const { setGuardianProfile } = useAppState();
+  const [name, setName] = useState('박보호');
+  const [id, setId] = useState('guardian1');
+  const [pw, setPw] = useState('');
+  const [phone, setPhone] = useState('010-9999-1234');
   const [address, setAddress] = useState(
-    guardianProfile.address || '서울시 마포구 독막로 45, 래미안아파트 101동 502호',
+    '서울시 마포구 독막로 45, 래미안아파트 101동 502호',
   );
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleBack = () => {
     navigation.navigate('GuardianLogin');
   };
 
-  const handleSignup = () => {
-    if (!name.trim() || !id.trim() || !pw.trim() || !phone.trim() || !address.trim()) {
+  const handleSignup = async () => {
+    const trimmedName = name.trim();
+    const trimmedId = id.trim();
+    const trimmedPhone = phone.trim();
+    const trimmedAddress = address.trim();
+
+    if (!trimmedName || !trimmedId || !pw || !trimmedPhone || !trimmedAddress) {
       setError('모든 항목을 올바르게 채워 주세요.');
       return;
     }
 
-    const updatedGuardian: Guardian = { name, id, pw, phone, address };
+    // 보호자 비밀번호 규칙(GuardianRegisterSerializer): 8자 이상 + 영문·숫자 조합.
+    // 서버 검증 메시지가 규칙별로 갈리고 min_length는 DRF 기본 영문 문구라,
+    // 프론트에서 조건을 확인해 한국어로 일관되게 안내한다.
+    if (pw.length < 8 || !/[a-zA-Z]/.test(pw) || !/[0-9]/.test(pw)) {
+      setError('비밀번호는 8자 이상이면서 영문과 숫자를 함께 포함해야 합니다.');
+      return;
+    }
 
-    setGuardianProfile(updatedGuardian);
-    navigation.navigate('GuardianHome');
+    setError('');
+    setLoading(true);
+    try {
+      // register는 토큰 없이 프로필만 주므로, 같은 자격 증명으로 곧바로 로그인해
+      // (로그인 배치의 persistSessionFromLoginResponse 흐름 재사용) 가입 즉시
+      // 홈으로 진입하는 기존 목업 UX를 유지한다.
+      const credentials = { login_id: trimmedId, password: pw };
+      const registered = await apiClient.post<GuardianProfileResponse>(
+        '/auth/guardian/register/',
+        {
+          ...credentials,
+          name: trimmedName,
+          phone: trimmedPhone,
+          address: trimmedAddress,
+        },
+        { auth: false },
+      );
+
+      const tokens = await apiClient.post<LoginTokenResponse>(
+        '/auth/guardian/login/',
+        credentials,
+        { auth: false },
+      );
+      await persistSessionFromLoginResponse(tokens);
+
+      const activeGuardian: Guardian = {
+        id: registered.login_id,
+        name: registered.name,
+        phone: registered.phone,
+        address: registered.address,
+        // 백엔드 응답에 비밀번호가 없어 폼 입력값을 보관한다(로그인 화면과 동일).
+        pw,
+      };
+
+      setGuardianProfile(activeGuardian);
+      navigation.navigate('GuardianHome');
+    } catch (err) {
+      setError(getRegisterErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -170,7 +228,8 @@ export default function GuardianSignupScreen() {
       <View style={styles.footer}>
         <Pressable
           onPress={handleSignup}
-          style={({ pressed }) => [pressed && styles.pressedScale]}
+          disabled={loading}
+          style={({ pressed }) => [(pressed || loading) && styles.pressedScale]}
         >
           <LinearGradient
             colors={[colors.primary, colors.primaryLight]}
@@ -178,7 +237,9 @@ export default function GuardianSignupScreen() {
             end={{ x: 1, y: 0 }}
             style={styles.submitButton}
           >
-            <Text style={styles.submitButtonText}>회원가입 완료</Text>
+            <Text style={styles.submitButtonText}>
+              {loading ? '가입 처리 중...' : '회원가입 완료'}
+            </Text>
           </LinearGradient>
         </Pressable>
       </View>

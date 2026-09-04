@@ -10,7 +10,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import {
+  apiClient,
+  getRegisterErrorMessage,
+  LoginTokenResponse,
+  persistSessionFromLoginResponse,
+  SeniorProfileResponse,
+} from '../../api/client';
 import { useAppState } from '../../context/AppStateContext';
+import { ACTIVITY_LEVEL_TO_MOBILITY_LEVEL } from '../../labels';
 import {
   colors,
   fontSizes,
@@ -40,33 +48,80 @@ export default function SignupScreen() {
   const [diseases, setDiseases] = useState('고혈압, 무릎 골관절염');
   const [activityLevel, setActivityLevel] = useState<ActivityLevel>('독립');
   const [medication, setMedication] = useState('혈압약 (아침식후 1정)');
+  const [loading, setLoading] = useState(false);
 
   const handleBack = () => {
     navigation.goBack();
   };
 
-  const handleRegister = () => {
-    if (!name.trim() || !id.trim() || !pw.trim() || !phone.trim() || !address.trim()) {
+  const handleRegister = async () => {
+    const trimmedName = name.trim();
+    const trimmedId = id.trim();
+    const trimmedPhone = phone.trim();
+    const trimmedAddress = address.trim();
+
+    if (!trimmedName || !trimmedId || !pw.trim() || !trimmedPhone || !trimmedAddress) {
       Alert.alert('', '필수 인적 사항(성함, 아이디, 비밀번호, 연락처, 주소)을 모두 채워주세요.');
       return;
     }
 
-    const profile: UserProfile = {
-      name,
-      id,
-      pw,
-      phone,
-      address,
-      diseases,
-      activityLevel,
-      medication,
-      // 신규 가입 시니어는 아직 획득한 열매가 없다. 실제 값은 로그인 후
-      // SeniorHomeScreen이 GET /senior/{id}/ 로 갱신한다.
-      fruitCount: 0,
-    };
+    // 백엔드(SeniorRegisterSerializer)는 정확히 숫자 4자리만 받는다. number-pad +
+    // maxLength로 입력 단계에서 대부분 막지만(시니어가 서버 왕복 후 에러를 보기
+    // 전에 걸러 주는 게 접근성상 낫다), 붙여넣기 등 우회에 대비해 한 번 더 검사한다.
+    // 문구는 로그인 화면의 "숫자 4자리" 안내와 맞춘다.
+    if (!/^\d{4}$/.test(pw)) {
+      Alert.alert('', '비밀번호는 숫자 4자리로 입력해 주세요.');
+      return;
+    }
 
-    setUserProfile(profile);
-    navigation.navigate('SeniorHome');
+    setLoading(true);
+    try {
+      // register는 토큰 없이 프로필만 주므로, 같은 자격 증명으로 곧바로 로그인해
+      // (로그인 배치의 persistSessionFromLoginResponse 흐름 재사용) 가입 즉시
+      // 홈으로 진입하는 기존 목업 UX를 유지한다.
+      const credentials = { login_id: trimmedId, password: pw };
+      const registered = await apiClient.post<SeniorProfileResponse>(
+        '/auth/senior/register/',
+        {
+          ...credentials,
+          name: trimmedName,
+          phone: trimmedPhone,
+          address: trimmedAddress,
+          diseases: diseases.trim(),
+          medication: medication.trim(),
+          mobility_level: ACTIVITY_LEVEL_TO_MOBILITY_LEVEL[activityLevel],
+        },
+        { auth: false },
+      );
+
+      const tokens = await apiClient.post<LoginTokenResponse>(
+        '/auth/senior/login/',
+        credentials,
+        { auth: false },
+      );
+      await persistSessionFromLoginResponse(tokens);
+
+      const profile: UserProfile = {
+        id: registered.login_id,
+        name: registered.name,
+        phone: registered.phone,
+        address: registered.address,
+        diseases: registered.diseases,
+        medication: registered.medication,
+        // register 응답의 enum 대신, 방금 선택한 한글 라벨을 그대로 쓴다(동일 값).
+        activityLevel,
+        fruitCount: registered.fruit_count,
+        // 백엔드 응답에 비밀번호가 없어 폼 입력값을 보관한다(로그인 화면과 동일).
+        pw,
+      };
+
+      setUserProfile(profile);
+      navigation.navigate('SeniorHome');
+    } catch (err) {
+      Alert.alert('', getRegisterErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -241,9 +296,16 @@ export default function SignupScreen() {
       <View style={styles.footer}>
         <Pressable
           onPress={handleRegister}
-          style={({ pressed }) => [styles.submitButton, pressed && styles.pressedPrimary]}
+          disabled={loading}
+          style={({ pressed }) => [
+            styles.submitButton,
+            pressed && styles.pressedPrimary,
+            loading && styles.submitButtonDisabled,
+          ]}
         >
-          <Text style={styles.submitButtonText}>회원가입 완료하기</Text>
+          <Text style={styles.submitButtonText}>
+            {loading ? '가입 처리 중...' : '회원가입 완료하기'}
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -394,6 +456,9 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.button,
     fontWeight: fontWeights.bold,
     color: colors.white,
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
   },
   pressedPrimary: {
     backgroundColor: '#256428',

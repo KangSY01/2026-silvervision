@@ -327,6 +327,25 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * 회원가입(POST /auth/senior/register/·/auth/guardian/register/) 전용 에러 메시지.
+ * 이 두 엔드포인트만 ModelSerializer 필드 검증 실패를 `{ login_id: [...] }` 형태로
+ * 주므로(공통 `{ detail }` 스키마 밖) `getApiErrorMessage`로는 잡히지 않아 여기서
+ * 다룬다. `login_id` unique 위반 메시지는 DRF 기본 영문이라 그대로 노출하지 않고
+ * 프론트에서 한국어 고정 문구로 안내한다. 비밀번호 규칙 위반은 두 화면 모두 전송
+ * 전에 클라이언트에서 먼저 검사하므로(시니어=숫자 4자리, 보호자=8자+영문숫자)
+ * 여기서 따로 다루지 않고 fallback으로 넘긴다.
+ */
+export function getRegisterErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.payload) {
+    const loginIdErrors = error.payload.login_id;
+    if (Array.isArray(loginIdErrors) && loginIdErrors.length > 0) {
+      return '이미 사용 중인 아이디입니다. 다른 아이디를 입력해 주세요.';
+    }
+  }
+  return getApiErrorMessage(error, '회원가입에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+}
+
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 interface RequestOptions {

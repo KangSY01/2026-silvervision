@@ -17,3 +17,20 @@ export const MOBILITY_LEVEL_TO_ACTIVITY_LEVEL: Record<
   partial_assist: '부분 보조',
   full_assist: '완전 보조',
 };
+
+/**
+ * 위 매핑의 역방향(화면 한글 라벨 → 백엔드 enum).
+ *
+ * 시니어 회원가입(`SignupScreen`)의 거동 수준 선택 UI가 한글 `ActivityLevel`로
+ * 상태를 들고 있는데, 등록 API(`POST /auth/senior/register/`)의 `mobility_level`은
+ * enum을 요구하므로 전송 직전에 변환한다. `ActivityLevel` 유니온이 늘어나면
+ * 여기서도 컴파일 에러가 나 누락이 드러난다.
+ */
+export const ACTIVITY_LEVEL_TO_MOBILITY_LEVEL: Record<
+  ActivityLevel,
+  SeniorProfileResponse['mobility_level']
+> = {
+  독립: 'independent',
+  '부분 보조': 'partial_assist',
+  '완전 보조': 'full_assist',
+};
