@@ -6,7 +6,7 @@ import {
   useContext,
   useState,
 } from 'react';
-import { EmergencyEvent, Guardian, Senior, UserProfile } from '../types';
+import { EmergencyEvent, Guardian, UserProfile } from '../types';
 
 // 로그인 전 초기값(플레이스홀더). LoginScreen이 로그인 성공 시 GET /senior/{id}/
 // 응답으로 setUserProfile()을 호출해 덮어쓰므로, 이 값은 로그인 화면 진입 전까지만
@@ -32,30 +32,6 @@ const DEFAULT_GUARDIAN: Guardian = {
   phone: '010-9999-1234',
   address: '서울시 마포구 독막로 45, 래미안아파트 101동 502호',
 };
-
-// TODO: 보호자용 백엔드 API 연결 후 실제 등록된 피보호자 목록으로 교체
-const DEFAULT_SENIORS: Senior[] = [
-  {
-    id: 'silver123',
-    name: '김철수',
-    status: 'stretch_completed',
-    weeklyWorkoutCount: 5,
-    avatarInitials: '철수',
-    phone: '010-5555-8888',
-    address: '서울시 종로구 건강길 100, 대왕빌라 3층',
-    diseases: '초기 퇴행성 관절염, 약간의 이명',
-  },
-  {
-    id: 'silver777',
-    name: '이순자',
-    status: 'not_connected',
-    weeklyWorkoutCount: 2,
-    avatarInitials: '순자',
-    phone: '010-2222-3333',
-    address: '서울시 서대문구 안산길 45, 한글아파트 104동',
-    diseases: '골다공증, 가벼운 고혈압',
-  },
-];
 
 // TODO: 보호자용 백엔드 API 연결 후 실제 긴급 알림 기록으로 교체
 const DEFAULT_ALERTS: EmergencyEvent[] = [
@@ -106,8 +82,6 @@ interface AppStateContextValue {
   setUserProfile: Dispatch<SetStateAction<UserProfile>>;
   guardianProfile: Guardian;
   setGuardianProfile: (guardian: Guardian) => void;
-  seniors: Senior[];
-  setSeniors: (seniors: Senior[]) => void;
   alerts: EmergencyEvent[];
   setAlerts: (alerts: EmergencyEvent[]) => void;
 }
@@ -117,7 +91,6 @@ const AppStateContext = createContext<AppStateContextValue | null>(null);
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [guardianProfile, setGuardianProfile] = useState<Guardian>(DEFAULT_GUARDIAN);
-  const [seniors, setSeniors] = useState<Senior[]>(DEFAULT_SENIORS);
   const [alerts, setAlerts] = useState<EmergencyEvent[]>(DEFAULT_ALERTS);
 
   return (
@@ -127,8 +100,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setUserProfile,
         guardianProfile,
         setGuardianProfile,
-        seniors,
-        setSeniors,
         alerts,
         setAlerts,
       }}

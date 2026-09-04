@@ -186,9 +186,8 @@ export default function GuardianActivityListScreen() {
   };
 
   const handleSelectSenior = (seniorId: number) => {
-    // SeniorDetailScreen은 아직 목업(AppStateContext.seniors)을 쓰는 별도 배치
-    // 대상이라 실제 조회는 다음 배치에서 붙는다. 파라미터 계약(seniorId:string)만
-    // 맞춰 둔다.
+    // SeniorDetail route param은 문자열 계약(RootStackParamList) - 상세 화면이
+    // Number()로 되돌려 API 조회에 쓴다.
     navigation.navigate('SeniorDetail', { seniorId: String(seniorId) });
   };
 

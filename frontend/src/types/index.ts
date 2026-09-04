@@ -22,17 +22,6 @@ export interface Guardian {
   address: string;
 }
 
-export interface Senior {
-  id: string;
-  name: string;
-  status: 'stretch_completed' | 'not_connected' | 'fall_detected';
-  weeklyWorkoutCount: number;
-  avatarInitials: string;
-  phone?: string;
-  address?: string;
-  diseases?: string;
-}
-
 export interface EmergencyEvent {
   id: string;
   type: 'fall' | 'injury';

@@ -1,6 +1,22 @@
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { ShieldCheck, UserMinus } from 'lucide-react-native';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import {
+  apiClient,
+  getApiErrorMessage,
+  getSession,
+  GuardianProfileResponse,
+  GuardianSeniorMapResponse,
+} from '../../api/client';
 import GuardianTabScreenLayout from '../../components/GuardianTabScreenLayout';
 import { useAppState } from '../../context/AppStateContext';
 import {
@@ -11,24 +27,197 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
-import { Senior } from '../../types';
+
+type LoadState = 'loading' | 'ready' | 'error';
+type EditableField = 'name' | 'phone' | 'address';
+
+const FIELD_LABEL: Record<EditableField, string> = {
+  name: '성함',
+  phone: '비상 연락처',
+  address: '비상 이송/거주지 주소',
+};
 
 export default function GuardianProfileScreen() {
   const navigation = useNavigation();
-  const { guardianProfile, seniors } = useAppState();
+  const { guardianProfile, setGuardianProfile } = useAppState();
 
-  const handleEditField = (field: string) => {
-    // TODO: 인라인 수정 기능 설계 및 구현 (백엔드 연동 후 진행)
-    console.log('[GuardianProfileScreen] edit field (미구현):', field);
+  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [profile, setProfile] = useState<GuardianProfileResponse | null>(null);
+  const [mappings, setMappings] = useState<GuardianSeniorMapResponse[]>([]);
+  const [editingField, setEditingField] = useState<EditableField | null>(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // 진입/복귀마다 재조회(다른 가디언 화면과 동일 패턴). 최초만 'loading'을
+  // 노출하고 이후 포커스 재조회는 기존 화면을 둔 채 조용히 갱신한다.
+  const load = useCallback(async () => {
+    setLoadState((prev) => (prev === 'ready' ? prev : 'loading'));
+    try {
+      const session = await getSession();
+      if (!session) {
+        setLoadState('error');
+        return;
+      }
+      const [profileRes, mappingRes] = await Promise.all([
+        apiClient.get<GuardianProfileResponse>(`/guardian/${session.userId}/`),
+        apiClient.get<GuardianSeniorMapResponse[]>(`/guardian/${session.userId}/seniors/`),
+      ]);
+      setProfile(profileRes);
+      setMappings(mappingRes);
+      setLoadState('ready');
+    } catch {
+      setLoadState('error');
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+      return () => {
+        // 화면을 떠나면 편집 상태는 버린다.
+        setEditingField(null);
+        setDraft('');
+      };
+    }, [load]),
+  );
+
+  const startEdit = (field: EditableField) => {
+    setEditingField(field);
+    setDraft(profile?.[field] ?? '');
   };
 
-  const handleUnlinkSenior = (senior: Senior) => {
-    // TODO: 실제 연동 해제(seniors 배열에서 제거) 로직 및 확인 다이얼로그 연결
-    console.log('[GuardianProfileScreen] unlink senior (미구현):', senior.name);
+  const cancelEdit = () => {
+    setEditingField(null);
+    setDraft('');
+  };
+
+  const saveEdit = async () => {
+    if (!editingField || !profile) return;
+    const value = draft.trim();
+    if (!value) {
+      Alert.alert('입력 오류', `${FIELD_LABEL[editingField]}을(를) 입력해 주세요.`);
+      return;
+    }
+    if (value === profile[editingField]) {
+      cancelEdit();
+      return;
+    }
+    setSaving(true);
+    try {
+      const session = await getSession();
+      if (!session) {
+        Alert.alert('세션 만료', '다시 로그인해 주세요.');
+        return;
+      }
+      const updated = await apiClient.patch<GuardianProfileResponse>(
+        `/guardian/${session.userId}/`,
+        { [editingField]: value },
+      );
+      setProfile(updated);
+      // GuardianHomeScreen 등이 읽는 공용 상태도 함께 갱신(성함 변경 등 반영).
+      setGuardianProfile({ ...guardianProfile, [editingField]: updated[editingField] });
+      setEditingField(null);
+      setDraft('');
+    } catch (err) {
+      Alert.alert('수정 실패', getApiErrorMessage(err, '잠시 후 다시 시도해 주세요.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const doUnlink = async (seniorId: number) => {
+    try {
+      const session = await getSession();
+      if (!session) {
+        Alert.alert('세션 만료', '다시 로그인해 주세요.');
+        return;
+      }
+      await apiClient.delete<void>(`/guardian/${session.userId}/seniors/${seniorId}/`);
+      setMappings((prev) => prev.filter((m) => m.senior.senior_id !== seniorId));
+    } catch (err) {
+      Alert.alert('연동 해제 실패', getApiErrorMessage(err, '잠시 후 다시 시도해 주세요.'));
+    }
+  };
+
+  const handleUnlinkSenior = (mapping: GuardianSeniorMapResponse) => {
+    Alert.alert(
+      '연동 해제',
+      `${mapping.senior.name} 어르신과의 연동을 해제하시겠습니까?\n` +
+        '해제하면 이 어르신의 활동·안전 정보를 더 이상 볼 수 없습니다.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '연동 해제',
+          style: 'destructive',
+          onPress: () => void doUnlink(mapping.senior.senior_id),
+        },
+      ],
+    );
   };
 
   const handleGoHome = () => {
     navigation.navigate('GuardianHome');
+  };
+
+  const renderEditableRow = (field: EditableField, last?: boolean) => {
+    const editing = editingField === field;
+    if (editing) {
+      return (
+        <View style={[styles.row, last && styles.rowLast, styles.rowEditing]}>
+          <View style={styles.editWrap}>
+            <Text style={styles.rowLabel}>{FIELD_LABEL[field]}</Text>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              style={[styles.editInput, field === 'address' && styles.editInputMultiline]}
+              multiline={field === 'address'}
+              autoFocus
+              editable={!saving}
+              keyboardType={field === 'phone' ? 'phone-pad' : 'default'}
+              placeholder={`${FIELD_LABEL[field]} 입력`}
+              placeholderTextColor={colors.disabledText}
+            />
+            <View style={styles.editActions}>
+              <Pressable
+                onPress={cancelEdit}
+                disabled={saving}
+                style={({ pressed }) => [styles.editCancelBtn, pressed && styles.pressedOpacity]}
+              >
+                <Text style={styles.editCancelText}>취소</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void saveEdit()}
+                disabled={saving}
+                style={({ pressed }) => [
+                  styles.editSaveBtn,
+                  pressed && styles.pressedOpacity,
+                  saving && styles.editSaveBtnDisabled,
+                ]}
+              >
+                <Text style={styles.editSaveText}>{saving ? '저장 중...' : '저장'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={[styles.row, last && styles.rowLast]}>
+        <View style={styles.rowInfo}>
+          <Text style={styles.rowLabel}>{FIELD_LABEL[field]}</Text>
+          <Text style={field === 'address' ? styles.rowValueSmall : styles.rowValue}>
+            {profile?.[field] || '정보 없음'}
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => startEdit(field)}
+          style={({ pressed }) => [styles.editLinkHit, pressed && styles.pressedOpacity]}
+        >
+          <Text style={styles.editLink}>수정</Text>
+        </Pressable>
+      </View>
+    );
   };
 
   return (
@@ -45,109 +234,85 @@ export default function GuardianProfileScreen() {
           </Text>
         </View>
 
-        {/* Personal Details Card */}
-        <View style={styles.card}>
-          <View style={styles.row}>
-            <View style={styles.rowInfo}>
-              <Text style={styles.rowLabel}>성함</Text>
-              <Text style={styles.rowValue}>{guardianProfile.name}</Text>
-            </View>
-            <Pressable
-              onPress={() => handleEditField('name')}
-              style={({ pressed }) => [pressed && styles.pressedOpacity]}
-            >
-              <Text style={styles.editLink}>수정</Text>
-            </Pressable>
-          </View>
+        {loadState === 'loading' ? (
+          <Text style={styles.stateText}>개인정보를 불러오는 중...</Text>
+        ) : loadState === 'error' || !profile ? (
+          <Text style={styles.stateText}>
+            개인정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
+          </Text>
+        ) : (
+          <>
+            {/* Personal Details Card */}
+            <View style={styles.card}>
+              {renderEditableRow('name')}
 
-          <View style={[styles.row, styles.rowMuted]}>
-            <View style={styles.rowInfo}>
-              <Text style={styles.rowLabel}>로그인 아이디</Text>
-              <Text style={styles.rowValueMuted}>{guardianProfile.id}</Text>
-            </View>
-            <Text style={styles.rowNoEdit}>수정 불가</Text>
-          </View>
-
-          <View style={styles.row}>
-            <View style={styles.rowInfo}>
-              <Text style={styles.rowLabel}>비밀번호</Text>
-              <Text style={styles.rowValue}>••••</Text>
-            </View>
-            <Pressable
-              onPress={() => handleEditField('password')}
-              style={({ pressed }) => [pressed && styles.pressedOpacity]}
-            >
-              <Text style={styles.editLink}>수정</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.row}>
-            <View style={styles.rowInfo}>
-              <Text style={styles.rowLabel}>비상 연락처</Text>
-              <Text style={styles.rowValue}>{guardianProfile.phone}</Text>
-            </View>
-            <Pressable
-              onPress={() => handleEditField('phone')}
-              style={({ pressed }) => [pressed && styles.pressedOpacity]}
-            >
-              <Text style={styles.editLink}>수정</Text>
-            </Pressable>
-          </View>
-
-          <View style={[styles.row, styles.rowLast]}>
-            <View style={styles.rowInfo}>
-              <Text style={styles.rowLabel}>비상 이송/거주지 주소</Text>
-              <Text style={styles.rowValueSmall}>{guardianProfile.address}</Text>
-            </View>
-            <Pressable
-              onPress={() => handleEditField('address')}
-              style={({ pressed }) => [pressed && styles.pressedOpacity]}
-            >
-              <Text style={styles.editLink}>수정</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Linked Seniors Management */}
-        <View style={styles.seniorSection}>
-          <Text style={styles.sectionHeading}>등록된 안심 피보호자 목록</Text>
-
-          {seniors.length > 0 ? (
-            <View style={styles.seniorList}>
-              {seniors.map((senior) => (
-                <View key={senior.id} style={styles.seniorRow}>
-                  <View style={styles.seniorRowLeft}>
-                    <View style={styles.seniorAvatar}>
-                      <Text style={styles.seniorAvatarText}>{senior.avatarInitials}</Text>
-                    </View>
-                    <View>
-                      <Text style={styles.seniorName}>{senior.name} 어르신</Text>
-                      <Text style={styles.seniorId}>아이디: {senior.id}</Text>
-                    </View>
-                  </View>
-
-                  <Pressable
-                    onPress={() => handleUnlinkSenior(senior)}
-                    style={({ pressed }) => [
-                      styles.unlinkButton,
-                      pressed && styles.unlinkButtonPressed,
-                    ]}
-                  >
-                    <UserMinus size={14} color={colors.danger} />
-                    <Text style={styles.unlinkButtonText}>연동 해제</Text>
-                  </Pressable>
+              <View style={[styles.row, styles.rowMuted]}>
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowLabel}>로그인 아이디</Text>
+                  <Text style={styles.rowValueMuted}>{profile.login_id}</Text>
                 </View>
-              ))}
+                <Text style={styles.rowNoEdit}>수정 불가</Text>
+              </View>
+
+              {/* 비밀번호 변경 API는 범위 밖(토큰 refresh/로그아웃 배치에서 확정).
+                  행 자체는 남겨 "비밀번호가 설정돼 있음"을 보이고, 우측만 준비 중 표기 -
+                  로그인 아이디 행과 같은 "비편집 행" 패턴이라 카드가 어색해지지 않는다. */}
+              <View style={styles.row}>
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowLabel}>비밀번호</Text>
+                  <Text style={styles.rowValue}>••••</Text>
+                </View>
+                <Text style={styles.rowNoEdit}>준비 중</Text>
+              </View>
+
+              {renderEditableRow('phone')}
+              {renderEditableRow('address', true)}
             </View>
-          ) : (
-            <View style={styles.emptySeniorBox}>
-              <Text style={styles.emptySeniorText}>
-                아직 등록 완료된 피보호자 어르신 정보가 없습니다.{'\n'}홈 화면 하단에서 추가 등록을
-                진행해 주세요.
-              </Text>
+
+            {/* Linked Seniors Management */}
+            <View style={styles.seniorSection}>
+              <Text style={styles.sectionHeading}>등록된 안심 피보호자 목록</Text>
+
+              {mappings.length > 0 ? (
+                <View style={styles.seniorList}>
+                  {mappings.map((mapping) => (
+                    <View key={mapping.map_id} style={styles.seniorRow}>
+                      <View style={styles.seniorRowLeft}>
+                        <View style={styles.seniorAvatar}>
+                          <Text style={styles.seniorAvatarText}>
+                            {mapping.senior.name.slice(-2)}
+                          </Text>
+                        </View>
+                        <View style={styles.seniorTextWrap}>
+                          <Text style={styles.seniorName}>{mapping.senior.name} 어르신</Text>
+                          <Text style={styles.seniorId}>아이디: {mapping.senior.login_id}</Text>
+                        </View>
+                      </View>
+
+                      <Pressable
+                        onPress={() => handleUnlinkSenior(mapping)}
+                        style={({ pressed }) => [
+                          styles.unlinkButton,
+                          pressed && styles.unlinkButtonPressed,
+                        ]}
+                      >
+                        <UserMinus size={14} color={colors.danger} />
+                        <Text style={styles.unlinkButtonText}>연동 해제</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptySeniorBox}>
+                  <Text style={styles.emptySeniorText}>
+                    아직 등록 완료된 피보호자 어르신 정보가 없습니다.{'\n'}홈 화면 하단에서 추가 등록을
+                    진행해 주세요.
+                  </Text>
+                </View>
+              )}
             </View>
-          )}
-        </View>
+          </>
+        )}
 
         {/* Safety Badge */}
         <View style={styles.safetyBadge}>
@@ -192,6 +357,12 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.medium,
     color: colors.textSecondary,
   },
+  stateText: {
+    fontSize: guardianFontSizes.label,
+    fontWeight: fontWeights.bold,
+    color: colors.textSecondary,
+    lineHeight: 22,
+  },
   card: {
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -213,6 +384,9 @@ const styles = StyleSheet.create({
   },
   rowMuted: {
     backgroundColor: colors.background,
+  },
+  rowEditing: {
+    backgroundColor: colors.primaryTintBackground,
   },
   rowInfo: {
     flex: 1,
@@ -251,6 +425,69 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.bold,
     color: colors.primary,
     textDecorationLine: 'underline',
+  },
+  editLinkHit: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    minWidth: GUARDIAN_MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+  },
+  editWrap: {
+    flex: 1,
+    gap: spacing.sm,
+  },
+  editInput: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: guardianFontSizes.input,
+    fontWeight: fontWeights.semibold,
+    color: colors.text,
+  },
+  editInputMultiline: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET + 24,
+    textAlignVertical: 'top',
+  },
+  editActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.sm,
+  },
+  editCancelBtn: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editCancelText: {
+    fontSize: guardianFontSizes.label,
+    fontWeight: fontWeights.bold,
+    color: colors.textMuted,
+  },
+  editSaveBtn: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editSaveBtnDisabled: {
+    opacity: 0.6,
+  },
+  editSaveText: {
+    fontSize: guardianFontSizes.label,
+    fontWeight: fontWeights.black,
+    color: colors.white,
   },
   seniorSection: {
     gap: spacing.sm + spacing.xs,
@@ -294,6 +531,9 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.black,
     color: colors.primary,
   },
+  seniorTextWrap: {
+    flex: 1,
+  },
   seniorName: {
     fontSize: guardianFontSizes.label,
     fontWeight: fontWeights.extrabold,
@@ -306,7 +546,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   unlinkButton: {
-    minHeight: 36,
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
     paddingHorizontal: spacing.sm + spacing.xs,
     borderWidth: 1,
     borderColor: colors.dangerBorder,
