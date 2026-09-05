@@ -30,5 +30,7 @@ API 연동 작업을 할 때는:
 
 ## 현재 진행 상태
 
-- **프론트엔드**: 시니어 화면 8개 + 보호자 화면 9개(총 17개) 및 네비게이션 전체 포팅 완료. 백엔드 API 연동은 화면 단위로 진행 중이며 현재 3개 화면(시니어 로그인, 보호자 로그인, 운동 선택)이 실제 API를 쓰고, 나머지는 `AppStateContext` 목업(mock)이다. 공통 API 클라이언트는 `src/api/client.ts`. 자세한 내용은 [frontend/AGENTS.md](frontend/AGENTS.md) 참고.
-- **백엔드**: Django 세팅 완료(MySQL, JWT/CORS), DB 모델 13개 테이블 + 마이그레이션 `0001`~`0006` 적용 완료, 시리얼라이저 13개 테이블 전 영역 작성 완료. 커스텀 JWT 인증(`RoleBasedJWTAuthentication`)·권한 클래스·API 뷰·URL 라우팅(`config/urls.py`에 `/api/v1/` 연결)까지 인증/계정/운동/기록/응급 5개 섹션 구현 완료. 미구현은 게임화 섹션 전체, `physical_ability_log`/`activity_log` API, 토큰 refresh·로그아웃. 자세한 내용은 [backend/AGENTS.md](backend/AGENTS.md) 5장 참고.
+_마지막 갱신: 2026-09-05 (commit `1245a66` 기준 전체 회귀 점검) — 이 절이 오래됐다고 의심되면 하위 문서 대신 코드(`git log`, `backend/api/urls.py`, `frontend/src/screens/`)로 먼저 교차검증할 것._
+
+- **프론트엔드**: 시니어 화면 8개 + 보호자 화면 9개(총 17개) 및 네비게이션 전체 포팅 완료, **17개 화면 전체 실제 API 연동 완료**(공통 클라이언트 `src/api/client.ts`). 다만 비전(Computer Vision) 연동 대기 지점은 의도적으로 임시값/목업을 남겨뒀다 — `ExerciseProgressScreen`·`ExerciseFeedbackScreen`의 `completion_rate`/`accuracy_avg`/`PoseFeedback` 값(각각 `// TODO(vision)` 주석), `AlertDetailScreen`의 응급 상세 타임라인(`TIMELINE`) 목업 배열. 자세한 내용은 [frontend/AGENTS.md](frontend/AGENTS.md) 참고.
+- **백엔드**: Django 세팅 완료(MySQL, JWT/CORS), DB 모델 13개 테이블 + 마이그레이션 `0001`~`0006` 적용 완료, 시리얼라이저 13개 테이블 전 영역 작성 완료. 커스텀 JWT 인증(`RoleBasedJWTAuthentication`)·권한 클래스·API 뷰·URL 라우팅(`config/urls.py`에 `/api/v1/` 연결)까지 **인증/계정/운동/기록/응급/게임화 전 섹션 구현 완료**(엔드포인트 총 24개, `api/tests.py` 82건 전체 통과). 미구현은 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API뿐이다. 자세한 내용은 [backend/AGENTS.md](backend/AGENTS.md) 5장 참고.

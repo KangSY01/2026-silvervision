@@ -12,7 +12,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `frontend/CLAUDE.md`·`backend/CLAUDE.md`는 각각 같은 폴더의 `AGENTS.md`를 `@`로 포함한 것이라 내용이 동일하다.
 
-**주의 — 문서 드리프트**: 두 `AGENTS.md`의 "현재 구현 상태 / 현재 진행 상태" 절은 코드보다 뒤처져 있다. 문서는 백엔드 `views.py`·`api/urls.py`와 커스텀 JWT 인증이 미구현이고 프론트엔드는 100% 목업이라고 적고 있으나, 실제로는 전 영역 엔드포인트(`views.py`/`api/urls.py`)와 `RoleBasedJWTAuthentication`이 구현 완료됐고 프론트 17개 화면이 전부 실제 API에 연동됐다. 구현 현황은 문서 대신 코드(`git log`, 아래 아키텍처 절)를 기준으로 판단하고, 관련 작업을 하는 김에 해당 절을 갱신할 것.
+**주의 — 문서 드리프트는 예상 못한 곳에서 생긴다**: "구현 현황/진행 상태"를 서술하는 절은 하위 `AGENTS.md`든 이 루트 문서든 실제 코드보다 뒤처지기 쉽다. 특정 하위 문서(예: `backend/AGENTS.md`, `frontend/AGENTS.md`)만 갱신 지시를 반복해서 받다 보면 정작 그 문서를 요약·인용하는 상위 문서(루트 `AGENTS.md`, 이 파일)가 갱신 대상에서 빠져 오히려 더 뒤처질 수 있다 — 2026-09-05 회귀 점검에서 실제로 backend/frontend `AGENTS.md`는 코드와 정확히 일치했지만, 그 둘을 요약한 루트 `AGENTS.md`의 "현재 진행 상태" 절이 뒤처져 있었다. 따라서 구현 현황은 어떤 문서도 100% 신뢰하지 말고, 항상 코드(`git log`, `backend/api/urls.py`, `frontend/src/screens/` 디렉터리, 테스트 실행 결과 등)로 교차검증할 것. 절을 갱신할 때는 그 절을 인용·요약하는 상위 문서가 있는지도 함께 확인해 같이 갱신한다.
+
+_마지막 전체 교차검증: 2026-09-05 (commit `1245a66` 기준) — 백엔드 엔드포인트 24개 전수 확인, `api/tests.py` 82건 전체 통과, 프론트 17개 화면 전체 API 연동 확인, 비전 연동 대기 지점(`// TODO(vision)` 등) 3곳(ExerciseProgressScreen·ExerciseFeedbackScreen·AlertDetailScreen) 확인. 이후 코드가 바뀌었다면 이 문단도 다시 신뢰할 수 없다._
 
 이 문서는 두 영역을 아우르는 명령어와 아키텍처 요약만 다룬다. 화면 목록, 테이블 전체 목록 등 세부사항은 중복 기술하지 않으므로 위 문서를 참고할 것.
 
