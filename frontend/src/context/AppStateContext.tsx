@@ -6,7 +6,7 @@ import {
   useContext,
   useState,
 } from 'react';
-import { EmergencyEvent, Guardian, UserProfile } from '../types';
+import { Guardian, UserProfile } from '../types';
 
 // 로그인 전 초기값(플레이스홀더). LoginScreen이 로그인 성공 시 GET /senior/{id}/
 // 응답으로 setUserProfile()을 호출해 덮어쓰므로, 이 값은 로그인 화면 진입 전까지만
@@ -33,57 +33,11 @@ const DEFAULT_GUARDIAN: Guardian = {
   address: '서울시 마포구 독막로 45, 래미안아파트 101동 502호',
 };
 
-// TODO: 보호자용 백엔드 API 연결 후 실제 긴급 알림 기록으로 교체
-const DEFAULT_ALERTS: EmergencyEvent[] = [
-  {
-    id: 'alert1',
-    type: 'fall',
-    message: '화장실 앞 낙상 의심 감지',
-    seniorName: '김철수',
-    timestamp: '오늘 10:15',
-    status: '미확인',
-  },
-  {
-    id: 'alert2',
-    type: 'injury',
-    message: '거실 소파 부근 미접속 감지',
-    seniorName: '김철수',
-    timestamp: '오늘 08:30',
-    status: '확인됨',
-  },
-  {
-    id: 'alert3',
-    type: 'fall',
-    message: '안방 침대 옆 낙상 의심 감지',
-    seniorName: '이순자',
-    timestamp: '어제 18:22',
-    status: '오탐',
-  },
-  {
-    id: 'alert4',
-    type: 'fall',
-    message: '거실 스마트 운동 중 균형상실 낙상 의심',
-    seniorName: '김철수',
-    timestamp: '어제 14:05',
-    status: '확인됨',
-  },
-  {
-    id: 'alert5',
-    type: 'injury',
-    message: '주방 싱크대 앞 부상 의심 감지',
-    seniorName: '이순자',
-    timestamp: '3일 전',
-    status: '확인됨',
-  },
-];
-
 interface AppStateContextValue {
   userProfile: UserProfile;
   setUserProfile: Dispatch<SetStateAction<UserProfile>>;
   guardianProfile: Guardian;
   setGuardianProfile: (guardian: Guardian) => void;
-  alerts: EmergencyEvent[];
-  setAlerts: (alerts: EmergencyEvent[]) => void;
 }
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
@@ -91,7 +45,6 @@ const AppStateContext = createContext<AppStateContextValue | null>(null);
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [guardianProfile, setGuardianProfile] = useState<Guardian>(DEFAULT_GUARDIAN);
-  const [alerts, setAlerts] = useState<EmergencyEvent[]>(DEFAULT_ALERTS);
 
   return (
     <AppStateContext.Provider
@@ -100,8 +53,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setUserProfile,
         guardianProfile,
         setGuardianProfile,
-        alerts,
-        setAlerts,
       }}
     >
       {children}

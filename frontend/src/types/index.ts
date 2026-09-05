@@ -22,15 +22,6 @@ export interface Guardian {
   address: string;
 }
 
-export interface EmergencyEvent {
-  id: string;
-  type: 'fall' | 'injury';
-  message: string;
-  seniorName: string;
-  timestamp: string;
-  status: '확인됨' | '오탐' | '미확인';
-}
-
 export interface Workout {
   id: number;
   name: string;
