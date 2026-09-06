@@ -304,7 +304,7 @@ silvervision/
 
 ### 4.4 프론트엔드 화면 목록
 
-`frontend/src/screens/{common,senior,guardian}/` 기준 17개 화면이며, **전 화면 실제 백엔드 API 연동 완료** 상태입니다.
+`frontend/src/screens/{common,senior,guardian}/` 기준 18개 화면이며, **전 화면 실제 백엔드 API 연동 완료** 상태입니다.
 
 | 구분 | 화면 | API 연동 | 비고 |
 |---|---|---|---|
@@ -316,6 +316,7 @@ silvervision/
 | 시니어 | ExerciseProgressScreen | ✅ 완료 | 미션 생성 → 세션 시작. `completion_rate` 등은 `// TODO(vision)` 임시값(비전 연동 대기) |
 | 시니어 | ExerciseFeedbackScreen | ✅ 완료 | 세션 완료 PATCH + 피드백 POST. `PLACEHOLDER_POSE_FEEDBACK`은 `// TODO(vision)` 임시값(비전 연동 대기) |
 | 시니어 | ProfileScreen | ✅ 완료 | 프로필 조회/수정 |
+| 시니어 | AbilityHistoryScreen | ✅ 완료 | 장기 신체 능력(관절 가동범위·동작 완성도) 추이 조회. 기록 생성 `POST`는 `// TODO(vision)`(비전 연동 대기) |
 | 보호자 | GuardianLoginScreen | ✅ 완료 | 보호자 로그인 + 프로필 조회 |
 | 보호자 | GuardianSignupScreen | ✅ 완료 | 회원가입 → 즉시 로그인 |
 | 보호자 | GuardianHomeScreen | ✅ 완료 | 피보호자 목록 조회 |
@@ -326,7 +327,7 @@ silvervision/
 | 보호자 | AlertDetailScreen | ✅ 완료 | 응급 상세 조회 + 상태 전이(PATCH). 상세 분석 타임라인(`TIMELINE`)은 비전팀 몫이라 목업 유지 |
 | 보호자 | GuardianProfileScreen | ✅ 완료 | 프로필 조회/수정, 피보호자 목록 |
 
-> `VoiceAssistantModal`은 화면 목록(17개)에 포함되지 않은 별도 컴포넌트로, 음성 인식 기능 설계가 미확정이라 포팅만 완료된 채 미마운트 상태입니다.
+> `VoiceAssistantModal`은 화면 목록(18개)에 포함되지 않은 별도 컴포넌트로, 음성 인식 기능 설계가 미확정이라 포팅만 완료된 채 미마운트 상태입니다.
 
 ## 5. 설치 및 실행 방법
 
@@ -387,7 +388,7 @@ npx tsc --noEmit        # strict TypeScript 타입 체크
 | 이름 | 이메일 | 주요 역할 | 세부 담당 |
 |---|---|---|---|
 | 강서영 | (추후 기재) | 백엔드 개발 + API 통합 | Django/DRF 기반 REST API 24개 엔드포인트 설계·구현, MySQL DB 스키마 13개 테이블 설계, JWT 인증(`RoleBasedJWTAuthentication`) 및 IDOR 방지 권한 설계, 응급 이벤트 상태 머신 구현 |
-| 박소영 | (추후 기재) | 프론트엔드 개발 + UI/UX 설계 | Expo(React Native)+TypeScript 기반 화면 17개 구현, 시니어/보호자 UX 분리 설계(4자리 PIN vs 일반 비밀번호 등 접근성 고려), 노년 특화 모델용 Keypoint 추출·데이터 라벨링 지원 |
+| 박소영 | (추후 기재) | 프론트엔드 개발 + UI/UX 설계 | Expo(React Native)+TypeScript 기반 화면 18개 구현, 시니어/보호자 UX 분리 설계(4자리 PIN vs 일반 비밀번호 등 접근성 고려), 노년 특화 모델용 Keypoint 추출·데이터 라벨링 지원 |
 | 주은택 | (추후 기재) | AI/비전 모듈 개발 (Pose Estimation) | MediaPipe 기반 관절 좌표 추출, 1D-CNN 낙상 분류 모델 설계 — **이 저장소 밖 별도 트랙에서 개발 진행 중** |
 
 > **역할 변경 이력**: 착수보고서 원안에는 강서영이 AI 모델(낙상 감지 알고리즘)도 겸임하는 것으로, 주은택은 "백엔드 + AI 모델" 공동 담당으로 명시되어 있었습니다. 중간보고서 단계에서 비전(Computer Vision) 파트를 주은택이 전담하는 것으로 역할이 재조정되었고, 이후 AI 모델(자세 추정·낙상 감지) 개발은 `frontend/`·`backend/` 코드베이스 밖에서 별도로 진행됩니다.

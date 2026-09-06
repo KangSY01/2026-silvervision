@@ -16,6 +16,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 _마지막 전체 교차검증: 2026-09-05 (commit `1245a66` 기준) — 백엔드 엔드포인트 24개 전수 확인, `api/tests.py` 82건 전체 통과, 프론트 17개 화면 전체 API 연동 확인, 비전 연동 대기 지점(`// TODO(vision)` 등) 3곳(ExerciseProgressScreen·ExerciseFeedbackScreen·AlertDetailScreen) 확인. 이후 코드가 바뀌었다면 이 문단도 다시 신뢰할 수 없다._
 
+_2026-09-06 추가: 중간보고서 4.1절의 "장기 신체 능력 변화 추적 화면"이 누락돼 있어 `AbilityHistoryScreen`(시니어)을 신설했다 — 기존 `GET /senior/{id}/ability-log/` 조회 전용(SeniorHome에서 진입). 이로써 프론트 화면은 18개. `rom_score`/`completion_score`를 채우는 `POST`는 비전 파이프라인 미연동이라 보류했고(`AbilityHistoryScreen`에 `// TODO(vision)` 명시), 비전 연동 대기 지점은 4곳이 됐다. 백엔드 변경 없음._
+
 이 문서는 두 영역을 아우르는 명령어와 아키텍처 요약만 다룬다. 화면 목록, 테이블 전체 목록 등 세부사항은 중복 기술하지 않으므로 위 문서를 참고할 것.
 
 ## 프로젝트 개요
@@ -84,7 +86,7 @@ npx tsc --noEmit        # strict TypeScript 타입 체크 (별도 lint/test npm 
 - Expo(~54) + React Native + TypeScript(strict). **단일 flat native-stack 네비게이터** — 중첩 탭 네비게이터는 없다. `App.tsx`의 `Stack.Navigator`(`headerShown: false`) 아래 시니어/보호자 전체 화면이 평면적으로 등록되어 있고, 하단 탭바처럼 보이는 `TabScreenLayout`/`GuardianTabScreenLayout` 컴포넌트가 `navigation.navigate()`로 스택 이동을 흉내낸다(이미 스택에 있는 화면이면 pop, 없으면 push).
 - 화면별 route params는 [frontend/src/navigation/types.ts](frontend/src/navigation/types.ts)의 `RootStackParamList`에서 관리 — 새 화면/params 추가 시 이 파일부터 갱신한다.
 - **API 레이어는 [frontend/src/api/client.ts](frontend/src/api/client.ts) 하나**: `apiClient.{get,post,patch,delete}`, JWT access/refresh를 `AsyncStorage`에 저장하고 인증 요청에 자동 첨부, `ApiError`/`getApiErrorMessage`로 DRF 에러(`{detail}` 또는 `{field: [...]}`) 처리, 인증 요청에서 401이 오면 세션을 자동 삭제한다(refresh 재시도 없음 — 백엔드에 재발급 엔드포인트가 없어 재로그인시킨다). 응답 타입 인터페이스도 이 파일에 모으고 각 인터페이스 주석에 대응하는 백엔드 시리얼라이저를 명시한다. 연동 시 요청/응답 형식은 실제 `backend/api/serializers.py`·`views.py`에서 확인하고, 불명확하면 임의 가정 대신 사용자에게 확인한다.
-- 화면 간 공유 전역 상태는 [frontend/src/context/AppStateContext.tsx](frontend/src/context/AppStateContext.tsx)(`useAppState()` 훅)에 있다. 백엔드 연동은 **17개 화면 전체 완료**됐고, 대부분의 화면은 `AppStateContext` 대신 화면 로컬 상태(`useFocusEffect` 포커스 재조회)를 쓴다. `AppStateContext`에는 로그인·프로필 PATCH로 채워지는 `userProfile`/`guardianProfile`만 남고(`SeniorHome`/`GuardianHome` 인사말 등이 소비) 목업 상수는 `DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`(로그인 전 플레이스홀더)만 남았다. 상세는 [frontend/AGENTS.md](frontend/AGENTS.md) 7장. 백엔드 enum → 화면 표시 라벨 변환은 `Record<enum, label>` 타입으로 만들어 enum 확장 시 컴파일 타임에 누락이 드러나게 한다.
+- 화면 간 공유 전역 상태는 [frontend/src/context/AppStateContext.tsx](frontend/src/context/AppStateContext.tsx)(`useAppState()` 훅)에 있다. 백엔드 연동은 **18개 화면 전체 완료**됐고(2026-09-06 `AbilityHistoryScreen` 추가), 대부분의 화면은 `AppStateContext` 대신 화면 로컬 상태(`useFocusEffect` 포커스 재조회)를 쓴다. `AppStateContext`에는 로그인·프로필 PATCH로 채워지는 `userProfile`/`guardianProfile`만 남고(`SeniorHome`/`GuardianHome` 인사말 등이 소비) 목업 상수는 `DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`(로그인 전 플레이스홀더)만 남았다. 상세는 [frontend/AGENTS.md](frontend/AGENTS.md) 7장. 백엔드 enum → 화면 표시 라벨 변환은 `Record<enum, label>` 타입으로 만들어 enum 확장 시 컴파일 타임에 누락이 드러나게 한다.
 - 디자인 소스는 이 레포 밖 형제 폴더 `../ai-studio-reference`(Google AI Studio 생성 웹 React+Tailwind 프로토타입)다 — 참고용일 뿐 실행 대상이 아니며, 그대로 복사하지 않고 RN으로 "포팅"한다(`div/span/button` → `View/Text/Pressable`, Tailwind → `StyleSheet`+theme 토큰, `lucide-react` → `lucide-react-native`, `hover` → `Pressable`의 `pressed` 스타일, `motion/react` 애니메이션은 우선 정적으로 구현).
 - 색상/폰트 크기/간격은 [frontend/src/theme/theme.ts](frontend/src/theme/theme.ts) 토큰만 사용하고 하드코딩하지 않는다. **시니어 UI 규칙**: 폰트 20pt 이상, 터치 타겟 56dp 이상(`theme.MIN_TOUCH_TARGET`).
 - 화면은 `src/screens/{common,senior,guardian}/`로 나뉘며 전체 포팅 완료 상태다 — 화면별 상세 현황은 frontend/AGENTS.md 표를 참고.

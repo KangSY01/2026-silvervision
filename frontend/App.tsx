@@ -7,6 +7,7 @@ import { AppStateProvider } from './src/context/AppStateContext';
 import { RootStackParamList } from './src/navigation/types';
 import EntryScreen from './src/screens/common/EntryScreen';
 import LoginScreen from './src/screens/common/LoginScreen';
+import AbilityHistoryScreen from './src/screens/senior/AbilityHistoryScreen';
 import ExerciseFeedbackScreen from './src/screens/senior/ExerciseFeedbackScreen';
 import ExerciseProgressScreen from './src/screens/senior/ExerciseProgressScreen';
 import ExerciseSelectScreen from './src/screens/senior/ExerciseSelectScreen';
@@ -40,6 +41,7 @@ export default function App() {
               <Stack.Screen name="ExerciseProgress" component={ExerciseProgressScreen} />
               <Stack.Screen name="ExerciseFeedback" component={ExerciseFeedbackScreen} />
               <Stack.Screen name="Profile" component={ProfileScreen} />
+              <Stack.Screen name="AbilityHistory" component={AbilityHistoryScreen} />
               <Stack.Screen name="GuardianLogin" component={GuardianLoginScreen} />
               <Stack.Screen name="GuardianSignup" component={GuardianSignupScreen} />
               <Stack.Screen name="GuardianHome" component={GuardianHomeScreen} />

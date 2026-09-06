@@ -130,6 +130,27 @@ export interface ActivityLogResponse {
 }
 
 /**
+ * backend/api/serializers.py의 PhysicalAbilityLogSerializer 응답 형태
+ * (GET /senior/{id}/ability-log/ 목록 항목, POST upsert 응답). 장기 신체 능력
+ * 추적의 일별 기록 한 건이며 하루 최대 1건이다(unique_together (senior,
+ * logged_date), GET은 logged_date 오름차순).
+ *
+ * rom_score(관절 가동범위)/completion_score(동작 완성도)는 DRF DecimalField라
+ * 문자열('70.00')로 직렬화된다. 두 값은 온디바이스 AI(자세 추정)가 계산해
+ * 보낸 결과를 백엔드가 저장만 한다(AI 모델 경계) - 아직 비전 파이프라인이
+ * 붙지 않아 실제로는 기록이 없을 수 있고, 그 경우 GET은 빈 배열을 준다.
+ * POST(기록 생성)는 비전 연동 시점의 작업이라 프론트에서 아직 호출하지 않는다
+ * (AbilityHistoryScreen 주석 참고).
+ */
+export interface PhysicalAbilityLogResponse {
+  log_id: number;
+  senior: number;
+  rom_score: string;
+  completion_score: string;
+  logged_date: string; // 'YYYY-MM-DD'
+}
+
+/**
  * backend/api/serializers.py의 MappedSeniorSerializer 형태
  * (GuardianSeniorMapSerializer.senior에 중첩). 보호자 쪽에서 피보호자를 식별할
  * 최소 정보만 담기며, 질환·복용약 등 민감 정보는 빠져 있다.

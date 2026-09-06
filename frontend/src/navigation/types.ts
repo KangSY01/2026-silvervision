@@ -18,6 +18,9 @@ export type RootStackParamList = {
     completionRate: number;
   };
   Profile: undefined;
+  // 장기 신체 능력 변화 추적(관절 가동범위·동작 완성도 추이). SeniorHome에서 진입,
+  // 화면이 GET /senior/{id}/ability-log/를 직접 조회한다(params 없음).
+  AbilityHistory: undefined;
   GuardianLogin: undefined;
   GuardianSignup: undefined;
   GuardianHome: undefined;

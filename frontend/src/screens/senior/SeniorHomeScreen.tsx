@@ -1,8 +1,8 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Award, MapPin, Sparkles } from 'lucide-react-native';
+import { Award, ChevronRight, LineChart, MapPin, Sparkles } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G, Path, Text as SvgText } from 'react-native-svg';
 import {
   apiClient,
@@ -16,6 +16,7 @@ import {
   colors,
   fontSizes,
   fontWeights,
+  MIN_TOUCH_TARGET,
   radius,
   spacing,
 } from '../../theme/theme';
@@ -47,6 +48,7 @@ const FRUIT_COORDS = [
 ];
 
 export default function SeniorHomeScreen() {
+  const navigation = useNavigation();
   const { userProfile, setUserProfile } = useAppState();
   const userName = userProfile.name;
 
@@ -258,6 +260,25 @@ export default function SeniorHomeScreen() {
             </View>
           </View>
         </View>
+
+        {/* 건강 변화 추적 화면 진입 */}
+        <View style={styles.abilitySection}>
+          <Pressable
+            onPress={() => navigation.navigate('AbilityHistory')}
+            style={({ pressed }) => [styles.abilityCard, pressed && styles.abilityCardPressed]}
+          >
+            <View style={styles.abilityIconWrap}>
+              <LineChart size={28} color={colors.primary} strokeWidth={2.5} />
+            </View>
+            <View style={styles.abilityTextArea}>
+              <Text style={styles.abilityTitle}>내 건강 변화 보기</Text>
+              <Text style={styles.abilityDescription}>
+                관절 가동범위·동작 완성도가 2주간 어떻게 변했는지 그래프로 확인해요.
+              </Text>
+            </View>
+            <ChevronRight size={24} color={colors.disabledText} strokeWidth={2.5} />
+          </Pressable>
+        </View>
       </ScrollView>
     </TabScreenLayout>
   );
@@ -435,5 +456,51 @@ const styles = StyleSheet.create({
     color: colors.disabledText,
     marginTop: spacing.xs,
     textAlign: 'center',
+  },
+  abilitySection: {
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+  },
+  abilityCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    minHeight: MIN_TOUCH_TARGET,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    padding: spacing.md,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 1,
+  },
+  abilityCardPressed: {
+    backgroundColor: colors.primarySoftBackground,
+  },
+  abilityIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.emeraldBackground,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  abilityTextArea: {
+    flex: 1,
+  },
+  abilityTitle: {
+    fontSize: fontSizes.body,
+    fontWeight: fontWeights.black,
+    color: colors.text,
+  },
+  abilityDescription: {
+    fontSize: 15,
+    fontWeight: fontWeights.medium,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+    lineHeight: 22,
   },
 });
