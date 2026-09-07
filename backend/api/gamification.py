@@ -107,6 +107,23 @@ def recompute_fruit_count(senior):
     return total
 
 
+def today_completed_count(senior):
+    """오늘(서버 로컬 날짜) 완료 처리된 세션 수.
+
+    fruit_count는 날짜별 상한을 적용한 **전체 누적**이라 "오늘 얼마나 했는가"를
+    나타내지 못한다(이틀째부터 6을 넘겨 화면의 6칸이 항상 꽉 차 보였다).
+    하루 목표 진행도는 이 값을 쓴다 - 자정이 지나면 0부터 다시 센다.
+
+    상한을 적용하지 않은 실제 완료 수라 6을 넘을 수 있다. 화면에서 6칸으로
+    자를지, 초과분을 따로 보여줄지는 표시 쪽 판단으로 남긴다.
+    """
+    today = timezone.localdate()
+    created_ats = _completed_sessions(
+        ExerciseSession.objects.filter(senior=senior)
+    ).values_list('created_at', flat=True)
+    return sum(1 for value in created_ats if _local_date(value) == today)
+
+
 def _assign_positions(rows):
     """점수 내림차순으로 정렬된 [(senior_id, score), ...] → {senior_id: 순위}.
 

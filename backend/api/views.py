@@ -476,6 +476,10 @@ class ExerciseSessionDetailView(generics.RetrieveUpdateAPIView):
         # 완료마다 그 날짜분을 전량 재계산하는 비용이 허용 가능하다고 판단했다
         # (부담이 커지면 manage.py recalculate_rankings로 배치 전환).
         if session.completion_rate is not None:
+            # 재계산 전 값을 남겨 두면 시리얼라이저가 "이번에 실제로 늘었는지"를
+            # 판단할 수 있다. 하루 상한(FRUIT_DAILY_CAP)에 걸렸거나 같은 세션을
+            # 다시 PATCH한 경우에는 전후가 같아 지급 없음으로 나간다.
+            session._fruit_before = session.senior.fruit_count
             recompute_fruit_count(session.senior)
             recalculate_rankings()
 

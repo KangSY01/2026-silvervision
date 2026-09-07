@@ -21,6 +21,7 @@ from .models import (
     RankingSnapshot,
     Senior,
 )
+from .gamification import FRUIT_DAILY_CAP, today_completed_count
 
 
 class AlreadyRegistered(APIException):
@@ -69,11 +70,24 @@ class SeniorRegisterSerializer(serializers.ModelSerializer):
 
 
 class SeniorProfileSerializer(serializers.ModelSerializer):
+    # 하루 목표 진행도. fruit_count는 날짜별 상한을 적용한 전체 누적이라
+    # "오늘 얼마나 했는가"를 나타내지 못한다(이틀째부터 6을 넘어 홈 화면의
+    # 열매 6칸이 늘 꽉 차 보였다). 홈 화면 건강 나무는 이 두 값을 쓴다.
+    today_completed = serializers.SerializerMethodField()
+    daily_goal = serializers.SerializerMethodField()
+
+    def get_today_completed(self, obj) -> int:
+        return today_completed_count(obj)
+
+    def get_daily_goal(self, obj) -> int:
+        return FRUIT_DAILY_CAP
+
     class Meta:
         model = Senior
         fields = (
             'login_id', 'name', 'phone', 'address', 'diseases',
             'medication', 'mobility_level', 'barcode_code', 'fruit_count',
+            'today_completed', 'daily_goal',
         )
         read_only_fields = ('barcode_code', 'fruit_count')
 
@@ -231,6 +245,10 @@ class ExerciseSerializer(serializers.ModelSerializer):
         fields = (
             'exercise_id', 'name', 'category', 'difficulty',
             'guide_image_url', 'silhouette_url', 'reference_angles',
+            # 카메라 판정 시퀀스 선택용 태그(모델 주석 참고). 프론트
+            # ExerciseSelectScreen이 이 값으로 Workout.poseWorkoutKey를 채우고,
+            # null인 운동은 목록에서 제외한다.
+            'pose_workout_key',
         )
 
 
@@ -324,9 +342,41 @@ class ExerciseSessionCompleteSerializer(serializers.ModelSerializer):
         validators=[MinValueValidator(0), MaxValueValidator(100)],
     )
 
+    # 완료 처리 결과로 열매가 실제로 지급됐는지를 응답에 함께 실어 보낸다.
+    # 프론트가 "+1 수확!"을 무조건 띄우지 않으려면 이 값이 필요한데, 별도
+    # GET /senior/{id}/ 를 한 번 더 치게 하면 그 사이 다른 세션이 끼어들 때
+    # 어긋날 수 있어 완료 응답에 포함하는 편이 정확하다.
+    #
+    # ExerciseSessionDetailView.perform_update()가 재계산 전후 값을 인스턴스에
+    # 실어 준다. completion_rate 없이 온 PATCH(=완료 처리가 아님)는 재계산을
+    # 하지 않으므로 지급도 없다.
+    fruit_count = serializers.SerializerMethodField()
+    fruit_awarded = serializers.SerializerMethodField()
+    # 결과 화면이 "오늘 2/6" 형태로 하루 진행도를 보여주는 데 쓴다. 한 세션의
+    # completion_rate는 정상 경로에서 항상 100이라(시퀀스를 끝까지 마쳐야
+    # 결과 화면에 도달) 그 값만으로는 화면에 보여줄 정보가 없다.
+    today_completed = serializers.SerializerMethodField()
+    daily_goal = serializers.SerializerMethodField()
+
+    def get_fruit_count(self, obj) -> int:
+        return obj.senior.fruit_count
+
+    def get_today_completed(self, obj) -> int:
+        return today_completed_count(obj.senior)
+
+    def get_daily_goal(self, obj) -> int:
+        return FRUIT_DAILY_CAP
+
+    def get_fruit_awarded(self, obj) -> bool:
+        before = getattr(obj, '_fruit_before', None)
+        return before is not None and obj.senior.fruit_count > before
+
     class Meta:
         model = ExerciseSession
-        fields = ('session_id', 'completion_rate', 'accuracy_avg')
+        fields = (
+            'session_id', 'completion_rate', 'accuracy_avg',
+            'fruit_count', 'fruit_awarded', 'today_completed', 'daily_goal',
+        )
         read_only_fields = ('session_id',)
 
 

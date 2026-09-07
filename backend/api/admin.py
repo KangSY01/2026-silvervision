@@ -43,9 +43,14 @@ class GuardianSeniorMapAdmin(admin.ModelAdmin):
 
 @admin.register(Exercise)
 class ExerciseAdmin(admin.ModelAdmin):
-    list_display = ('exercise_id', 'name', 'category', 'difficulty')
+    # 시드 스크립트/fixture가 없어 /admin/이 Exercise 입력의 유일한 경로다.
+    # pose_workout_key가 비어 있으면 프론트 운동 목록에서 조용히 빠지므로
+    # 목록·필터에 노출해 누락을 바로 발견할 수 있게 한다.
+    list_display = (
+        'exercise_id', 'name', 'category', 'difficulty', 'pose_workout_key',
+    )
     search_fields = ('name', 'category')
-    list_filter = ('category', 'difficulty')
+    list_filter = ('category', 'difficulty', 'pose_workout_key')
 
 
 @admin.register(ExerciseMission)
