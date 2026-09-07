@@ -1,0 +1,44 @@
+# 로컬 개발용 MySQL. Django(backend/)는 컨테이너가 아니라 호스트의 venv에서
+# 실행하며 127.0.0.1:3306으로 붙는다 - 프론트가 실기기 카메라를 써야 해서
+# 어차피 호스트 작업이 필요하고, manage.py 명령을 그대로 쓰기 위해서다.
+#
+#   docker compose up -d          # 기동 (healthy가 될 때까지 10~20초)
+#   docker compose ps             # 상태 확인
+#   docker compose logs -f db     # 로그
+#   docker compose down           # 정지 (데이터 유지)
+#   docker compose down -v        # 정지 + 데이터 삭제 (스키마 초기화용)
+services:
+  db:
+    image: mysql:8.0
+    container_name: silvervision-mysql
+    restart: unless-stopped
+    # 한글(운동명·주소·질환 등)이 들어가므로 서버 기본 charset을 utf8mb4로 고정한다.
+    # settings.py의 DATABASES에 OPTIONS/charset 지정이 없어 서버 기본값을 그대로 따르기 때문.
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: silvervision
+      MYSQL_USER: silver
+      MYSQL_PASSWORD: silverpw
+    ports:
+      # 127.0.0.1에 묶어 이 PC에서만 접속 가능하게 한다. 왼쪽을 "3306:3306"으로
+      # 두면 모든 인터페이스에 열려, 공용 와이파이 등에서 같은 네트워크의 누구나
+      # 아래 MYSQL_PASSWORD로 접속할 수 있다.
+      # 호스트 3306이 이미 쓰이고 있으면 가운데 값만 바꾸고 .env의 DB_PORT도 맞춘다.
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 최초 기동(빈 볼륨) 시 1회만 실행된다. 이미 만들어진 볼륨에는 적용되지 않으므로
+      # 내용을 고쳤다면 docker compose down -v 로 볼륨을 지우고 다시 올려야 한다.
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-prootpw"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  mysql-data:

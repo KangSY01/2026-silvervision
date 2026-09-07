@@ -1,0 +1,13 @@
+# 저장소에는 항상 LF로 저장한다. 각자 PC의 core.autocrlf 설정과 무관하게
+# 동작하므로, 계정·OS가 섞인 환경에서 줄바꿈만 바뀐 대량 diff가 생기지 않는다.
+* text=auto eol=lf
+
+# 바이너리는 변환 대상에서 제외한다.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.tflite binary
+*.jks binary
+*.keystore binary
