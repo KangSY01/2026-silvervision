@@ -28,7 +28,11 @@ const DEFAULT_PROFILE: UserProfile = {
 const DEFAULT_GUARDIAN: Guardian = {
   name: '박보호',
   id: 'guardian1',
-  pw: '1234',
+  // 보호자 비밀번호는 8자 이상 영문+숫자여야 해(GuardianRegisterSerializer)
+  // 시니어처럼 '1234'를 쓸 수 없다. GuardianLoginScreen이 이 값을 입력칸
+  // 기본값으로 깔아두므로 실제 개발용 계정과 같은 값이어야 버튼만 눌러
+  // 로그인된다.
+  pw: 'guardian1234',
   phone: '010-9999-1234',
   address: '서울시 마포구 독막로 45, 래미안아파트 101동 502호',
 };

@@ -19,7 +19,7 @@ Claude Code가 이 저장소(`silvervision`) **루트**에서 작업을 시작�
 
 - `frontend/` — UI, 네비게이션, (목업/로컬) 상태관리만 다룬다. 실제 데이터 영속화나 인증 로직은 없다.
 - `backend/` — API 서버, DB만 다룬다. **AI가 이미 계산한 결과값(운동 달성률·관절 편차·응급 이벤트 등)을 저장·조회하는 API만 제공하며, 추론 로직 자체는 구현하지 않는다** (자세한 경계는 [backend/AGENTS.md](backend/AGENTS.md#3-ai-모델-경계) 참고).
-- **AI 모델(BlazePose 기반 포즈 추정, 동작 분류기 등)은 별도 담당 영역이며, 이 레포의 `frontend/`·`backend/` 어디에도 구현하지 않는다.** AI 관련 코드나 모델 파일을 이 두 폴더 안에 추가해 달라는 요청을 받으면, 범위 밖임을 알리고 사용자에게 확인을 구할 것.
+- **AI 모델(BlazePose 기반 포즈 추정, 동작 분류기 등)은 별도 담당 영역이며, 이 레포의 `frontend/`·`backend/` 어디에도 새로 구현하지 않는다.** 이 영역은 별도 프로토타입 앱 `VideoTensor`(이 저장소 밖, 병합 전 저장소 `2026-silvervision-main/VideoTensor/`에 있음)에서 개발·튜닝되며, 실기기로 검증된 판정 로직(모델 학습·추론 자체는 제외)만 사람이 직접 `frontend/src/pose/`로 포팅하는 절차가 이미 확립돼 있다(`frontend/docs/ASSEMBLY.md` 참고). 이 절차를 벗어난 AI 관련 코드나 모델 파일을 `frontend/`·`backend/`에 추가해 달라는 요청을 받으면, 범위 밖임을 알리고 사용자에게 확인을 구할 것.
 
 ## 프론트-백엔드 계약(contract) 확인
 
@@ -30,7 +30,9 @@ API 연동 작업을 할 때는:
 
 ## 현재 진행 상태
 
-_마지막 갱신: 2026-09-05 (commit `1245a66` 기준 전체 회귀 점검) — 이 절이 오래됐다고 의심되면 하위 문서 대신 코드(`git log`, `backend/api/urls.py`, `frontend/src/screens/`)로 먼저 교차검증할 것._
+_마지막 갱신: 2026-09-06 (비전 갈래 ↔ 백엔드 갈래 병합) — 이 절이 오래됐다고 의심되면 하위 문서 대신 코드(`backend/api/urls.py`, `frontend/src/screens/`, 테스트 실행 결과)로 먼저 교차검증할 것._
 
-- **프론트엔드**: 시니어 화면 9개 + 보호자 화면 9개(총 18개) 및 네비게이션 전체 포팅 완료, **18개 화면 전체 실제 API 연동 완료**(공통 클라이언트 `src/api/client.ts`). 2026-09-06 중간보고서 4.1절 누락분인 `AbilityHistoryScreen`(장기 신체 능력 변화 추적, `GET /senior/{id}/ability-log/` 조회 전용) 신설. 다만 비전(Computer Vision) 연동 대기 지점은 의도적으로 임시값/목업/보류를 남겨뒀다 — `ExerciseProgressScreen`·`ExerciseFeedbackScreen`의 `completion_rate`/`accuracy_avg`/`PoseFeedback` 값(각각 `// TODO(vision)` 주석), `AlertDetailScreen`의 응급 상세 타임라인(`TIMELINE`) 목업 배열, `AbilityHistoryScreen`의 `rom_score`/`completion_score` 기록 생성 `POST` 보류(`// TODO(vision)`). 자세한 내용은 [frontend/AGENTS.md](frontend/AGENTS.md) 참고.
-- **백엔드**: Django 세팅 완료(MySQL, JWT/CORS), DB 모델 13개 테이블 + 마이그레이션 `0001`~`0006` 적용 완료, 시리얼라이저 13개 테이블 전 영역 작성 완료. 커스텀 JWT 인증(`RoleBasedJWTAuthentication`)·권한 클래스·API 뷰·URL 라우팅(`config/urls.py`에 `/api/v1/` 연결)까지 **인증/계정/운동/기록/응급/게임화 전 섹션 구현 완료**(엔드포인트 총 24개, `api/tests.py` 82건 전체 통과). 미구현은 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API뿐이다. 자세한 내용은 [backend/AGENTS.md](backend/AGENTS.md) 5장 참고.
+- **프론트엔드**: 시니어 화면 9개(공통 Entry/Login + `AbilityHistoryScreen` 포함) + 보호자 화면 9개(총 18개 제품 화면) 및 네비게이션 전체 포팅 완료, **18개 화면 전체 실제 API 연동 완료**(공통 클라이언트 `src/api/client.ts`, `EntryScreen`은 조회 대상 없는 진입 화면). 그 외 개발 전용 `PoseSmokeTestScreen`(카메라 파이프라인 단독 확인, `EntryScreen`의 `__DEV__` 링크로 진입) 1개. **카메라 기반 운동 자세 매칭·낙상 감지도 연결 완료** — `src/pose/{exercise,fall}`이 온디바이스로 판정하고, 그 결과가 운동 세션(`completion_rate`)·응급 이벤트(`POST /emergency/`)로 백엔드에 저장된다(frontend/AGENTS.md 9장). 네이티브 모듈을 쓰므로 **Expo Go가 아니라 개발 빌드(`npx expo run:android`)가 필요**하다.
+  - 아직 임시값으로 남은 지점: `PoseFeedback.deviation`(관절별 편차)과 `accuracy_avg` — `matcher.ts`의 `matchesPose()`가 boolean만 반환해 각도 편차를 노출하지 않는 것이 공통 원인이며, 현재 `accuracy_avg`는 `completion_rate`와 같은 값이다(`// TODO(vision)` 주석). `AlertDetailScreen`의 응급 상세 타임라인(`TIMELINE`)도 목업 배열이다.
+- **백엔드**: Django 세팅 완료(MySQL, JWT/CORS), DB 모델 13개 테이블 + 마이그레이션 `0001`~`0007` 적용 완료, 시리얼라이저 13개 테이블 전 영역 작성 완료. 커스텀 JWT 인증(`RoleBasedJWTAuthentication`)·권한 클래스·API 뷰·URL 라우팅(`config/urls.py`에 `/api/v1/` 연결)까지 **인증/계정/운동/기록/응급/게임화 전 섹션 구현 완료**(엔드포인트 총 24개, `api/tests.py` 85건 전체 통과). 미구현은 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API뿐이다. 자세한 내용은 [backend/AGENTS.md](backend/AGENTS.md) 5장 참고.
+  - `0007`은 `Exercise.pose_workout_key` 추가 — 운동 행과 프론트 포즈 시퀀스를 잇는 태그이며, 판정 로직은 여전히 프론트 소유다(`backend/DB_SCHEMA.md` 참고).

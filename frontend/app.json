@@ -16,6 +16,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.silvervision.frontend",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -25,6 +26,17 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "react-native-fast-tflite",
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "실버비전이 운동 자세 분석과 낙상 감지를 위해 카메라를 사용합니다.",
+          "enableMicrophonePermission": false
+        }
+      ],
+      "./plugins/withPoseDetector.js"
+    ]
   }
 }

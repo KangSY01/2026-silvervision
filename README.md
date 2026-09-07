@@ -68,19 +68,20 @@
 
 | 영역 | 기술 | 버전 | 비고 |
 |---|---|---|---|
-| 프론트엔드 | Expo | ~54.0.35 | `frontend/package.json` 기준 |
-| | React / React Native | 19.1.0 / 0.81.5 | |
+| 프론트엔드 | Expo | ~55.0.24 | `frontend/package.json` 기준. 카메라 네이티브 모듈 때문에 Expo Go 불가 → 개발 빌드 필요 |
+| | React / React Native | 19.2.0 / 0.83.10 | |
 | | TypeScript | ~5.9.2 (strict) | |
 | | React Navigation (native / native-stack) | ^7.3.8 / ^7.17.10 | 단일 flat native-stack 네비게이터 |
 | | @react-native-async-storage/async-storage | 2.2.0 | JWT access/refresh 토큰 저장 |
-| | react-native-svg / expo-linear-gradient / lucide-react-native | 15.12.1 / ~15.0.8 / ^1.24.0 | UI 아이콘·그라디언트 |
+| | react-native-svg / expo-linear-gradient / lucide-react-native | 15.15.3 / ~55.0.16 / ^1.24.0 | UI 아이콘·그라디언트 |
+| | react-native-vision-camera / react-native-fast-tflite / react-native-reanimated / react-native-worklets(-core) | ^4.7.2 / ^3.0.1 / 4.2.1 / 0.7.4·^1.6.3 | 카메라 프레임 프로세서 + 온디바이스 포즈 매칭·낙상 감지 (`src/pose/`, `plugins/`) |
 | 백엔드 | Django | 6.0.7 | `backend/requirements.txt` 기준 |
 | | djangorestframework | 3.17.1 | |
 | | djangorestframework_simplejwt | 5.5.1 | 커스텀 인증 클래스(`RoleBasedJWTAuthentication`)와 함께 사용 |
 | | MySQL / mysqlclient | 8.x / 2.2.8 | |
 | | django-cors-headers | 4.9.0 | 개발 단계 CORS 전체 허용 |
 | | python-dotenv | 1.2.2 | `.env` 시크릿 로드 |
-| AI(자세 추정/응급 감지) | MediaPipe(BlazePose), TensorFlow, 1D-CNN 낙상 분류기 | — | **이 저장소 밖 별도 트랙에서 개발 중** — `frontend/`·`backend/` 코드에는 포함되지 않음 |
+| AI(자세 추정/응급 감지) | MediaPipe(BlazePose), TensorFlow, 1D-CNN 낙상 분류기 | — | 모델 학습·추론(BlazePose 키포인트 추출, CNN 학습)은 **이 저장소 밖 별도 트랙(`VideoTensor` 프로토타입)**. 단, 실기기 검증을 마친 **자세 매칭·낙상 판정 로직**은 `frontend/src/pose/{exercise,fall}`로 수동 포팅됨(절차: `frontend/docs/ASSEMBLY.md`) |
 | 알림 | Firebase Cloud Messaging (FCM) | — | 백엔드는 `emergency_notification.channel`에 발송 채널·이력만 기록. **실제 FCM 발송 연동은 아직 미구현**(범위 밖) |
 
 ### 3.2 시스템 구성도
@@ -89,8 +90,8 @@
 
 전체 흐름은 다음과 같습니다.
 
-- **프론트엔드(Expo/React Native)**가 카메라 프레임을 획득하고, AI 파트(별도 트랙)가 온디바이스에서 BlazePose 기반 관절 좌표를 추출해 (1) 운동 중에는 기준 각도(`reference_angles`) 대비 편차를 계산해 실시간 피드백을 주고, (2) 상시로는 낙상·무활동 여부를 분류합니다.
-- 운동 결과(`completion_rate`/`accuracy_avg`/`pose_feedback`)와 응급 이벤트(`event_type`/`detection_source`)는 클라이언트가 계산까지 마친 값을 **백엔드(Django REST API)**로 전송하며, 백엔드는 이 값을 검증·저장·조회하는 역할만 담당합니다(AI 모델 경계).
+- **프론트엔드(Expo/React Native)**가 카메라 프레임을 획득하고, 온디바이스 네이티브 프레임 프로세서(`react-native-vision-camera` + MediaPipe PoseLandmarker, `frontend/plugins/native/`)가 33개 관절 좌표를 추출합니다. 그 좌표를 `frontend/src/pose/`의 판정 로직이 받아 (1) 운동 중에는 기준 포즈 시퀀스(`WORKOUT_POSE_SEQUENCES`)와 매칭해 단계 진행을 집계하고, (2) 상시로는 `fall_cnn_quant.tflite`로 낙상 여부를 분류합니다. (BlazePose 모델·CNN 학습 자체는 별도 트랙.)
+- 운동 결과(`completion_rate`/`accuracy_avg`)와 응급 이벤트(`event_type`/`detection_source`)는 클라이언트가 계산까지 마친 값을 **백엔드(Django REST API)**로 전송하며, 백엔드는 이 값을 검증·저장·조회하는 역할만 담당합니다(AI 모델 경계). 관절별 편차(`pose_feedback`)는 현재 포즈 매처가 통과/실패만 반환해 실측값이 없어 프론트에서 전송하지 않습니다(엔드포인트는 대기 상태로 보존).
 - 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이되며, `notified` 상태가 되면 보호자 앱에 알림 레코드가 남고(FCM 실발송은 범위 밖), 제한 시간 동안 카메라 접근 권한(`camera_access_grant`)이 부여됩니다.
 - 보호자 앱은 매핑된 피보호자의 프로필·운동 이력·응급 이력을 조회 전용으로 볼 수 있고, 시니어 본인만 자신의 데이터를 쓸 수 있습니다(IDOR 방지 권한 설계).
 
@@ -161,6 +162,7 @@ erDiagram
         string guide_image_url
         string silhouette_url
         json reference_angles
+        string pose_workout_key
     }
 
     EXERCISE_MISSION {
@@ -269,7 +271,7 @@ erDiagram
 | 응급 | POST·DELETE | `emergency/{event_id}/camera-grant/` | 카메라 접근 권한 부여/즉시 만료 | 본인·매핑된 보호자 |
 | 게임화 | GET | `senior/{senior_id}/ranking/` | 전국/지역 최신 랭킹 스냅샷 조회 | 본인 |
 
-**미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 82건 통과).
+**미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 85건 통과).
 
 ### 4.3 디렉토리 구조
 
@@ -279,32 +281,37 @@ silvervision/
 ├── CLAUDE.md               # 루트 AGENTS.md를 포함한 Claude Code 진입 문서
 ├── CONTRIBUTING.md         # 전체 협업 가이드
 ├── README.md
+├── compose.yaml            # MySQL 8.0 개발용 컨테이너
+├── docker/mysql/init/      # DB 초기화 스크립트
 ├── backend/                 # Django REST API 서버
 │   ├── AGENTS.md
 │   ├── DB_SCHEMA.md         # 13개 테이블 스키마 문서
 │   ├── claude-security-guidance.md
-│   ├── api/                 # models.py / views.py / serializers.py / urls.py / permissions.py / authentication.py 등
+│   ├── api/                 # models.py / views.py / serializers.py / urls.py / permissions.py / authentication.py / management/commands/(seed_*) 등
 │   ├── config/               # Django 프로젝트 설정 (settings.py, config/urls.py)
 │   ├── manage.py
 │   └── requirements.txt
-└── frontend/                 # Expo(React Native) 앱
+└── frontend/                 # Expo(React Native) 앱 — Expo Go 불가, 개발 빌드 필요
     ├── AGENTS.md
     ├── App.tsx               # 진입점: SafeAreaProvider → AppStateProvider → NavigationContainer
-    ├── app.json
-    ├── assets/
+    ├── app.json / babel.config.js / metro.config.js
+    ├── plugins/              # withPoseDetector.js(config plugin) + native/(PoseDetectorPlugin.kt, MediaPipe .task)
+    ├── assets/               # models/(tflite) · poses/(기준 포즈 JSON) · pose-silhouettes/(PNG)
+    ├── docs/ASSEMBLY.md      # src/pose 수동 포팅 절차·동기화 체크리스트
     ├── src/
-    │   ├── api/client.ts      # 공통 API 클라이언트(fetch 래퍼, JWT 저장/첨부)
+    │   ├── api/client.ts      # 공통 API 클라이언트(fetch 래퍼, JWT 저장/첨부/재발급)
     │   ├── context/AppStateContext.tsx
     │   ├── navigation/types.ts
+    │   ├── pose/              # exercise/(운동 자세 매칭)·fall/(낙상 감지) 온디바이스 판정 로직 (frontend/AGENTS.md 9장)
     │   ├── screens/            # common/ senior/ guardian/ — 4.4절 참고
     │   ├── theme/theme.ts
     │   └── types/
-    └── tsconfig.json
+    └── tsconfig.json          # @/* → ./src/* 경로 별칭
 ```
 
 ### 4.4 프론트엔드 화면 목록
 
-`frontend/src/screens/{common,senior,guardian}/` 기준 18개 화면이며, **전 화면 실제 백엔드 API 연동 완료** 상태입니다.
+`frontend/src/screens/{common,senior,guardian}/` 기준 18개 제품 화면이며, **전 화면 실제 백엔드 API 연동 완료** 상태입니다. 그 외 개발 전용 `PoseSmokeTestScreen`(카메라 파이프라인 단독 확인, `EntryScreen`의 `__DEV__` 링크로 진입)이 별도로 있습니다.
 
 | 구분 | 화면 | API 연동 | 비고 |
 |---|---|---|---|
@@ -313,10 +320,10 @@ silvervision/
 | 시니어 | SignupScreen | ✅ 완료 | 회원가입 → 즉시 로그인 |
 | 시니어 | SeniorHomeScreen | ✅ 완료 | 프로필 + 랭킹 조회 |
 | 시니어 | ExerciseSelectScreen | ✅ 완료 | 운동 목록 조회 |
-| 시니어 | ExerciseProgressScreen | ✅ 완료 | 미션 생성 → 세션 시작. `completion_rate` 등은 `// TODO(vision)` 임시값(비전 연동 대기) |
-| 시니어 | ExerciseFeedbackScreen | ✅ 완료 | 세션 완료 PATCH + 피드백 POST. `PLACEHOLDER_POSE_FEEDBACK`은 `// TODO(vision)` 임시값(비전 연동 대기) |
+| 시니어 | ExerciseProgressScreen | ✅ 완료 | 미션 생성 → 세션 시작. `completion_rate`는 카메라 파이프라인이 집계한 실제 단계 통과율 |
+| 시니어 | ExerciseFeedbackScreen | ✅ 완료 | 세션 완료 PATCH. 하루 목표 진행도와 열매 지급 결과를 응답에서 읽어 표시 |
 | 시니어 | ProfileScreen | ✅ 완료 | 프로필 조회/수정 |
-| 시니어 | AbilityHistoryScreen | ✅ 완료 | 장기 신체 능력(관절 가동범위·동작 완성도) 추이 조회. 기록 생성 `POST`는 `// TODO(vision)`(비전 연동 대기) |
+| 시니어 | AbilityHistoryScreen | ✅ 완료 | 장기 신체 능력(관절 가동범위·동작 완성도) 추이 조회 (조회 전용). 기록 생성 `POST`는 비전 실측값 대기 |
 | 보호자 | GuardianLoginScreen | ✅ 완료 | 보호자 로그인 + 프로필 조회 |
 | 보호자 | GuardianSignupScreen | ✅ 완료 | 회원가입 → 즉시 로그인 |
 | 보호자 | GuardianHomeScreen | ✅ 완료 | 피보호자 목록 조회 |
@@ -331,51 +338,106 @@ silvervision/
 
 ## 5. 설치 및 실행 방법
 
+### 5.0 사전 요구 사항
+
+| 도구 | 용도 |
+|---|---|
+| Docker Desktop | MySQL 8.0 컨테이너 (`compose.yaml`) |
+| Python 3.12 | 백엔드 |
+| Node.js + npm | 프론트엔드 |
+| JDK 17 + Android SDK(`adb`) | 안드로이드 개발 빌드 |
+
+MySQL을 직접 설치할 필요는 없습니다. `compose.yaml`이 초기화 스크립트까지 포함해 컨테이너로 띄웁니다.
+
 ### 5.1 백엔드 (`backend/`)
+
+**1) DB 기동** — 저장소 루트에서:
+
+```bash
+docker compose up -d          # MySQL 8.0 (silvervision-mysql)
+```
+
+**2) 가상환경과 의존성**
 
 ```bash
 cd backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1      # Windows
-source venv/bin/activate          # macOS/Linux
+python -m venv .venv
+.venv\Scripts\Activate.ps1      # Windows
+source .venv/bin/activate         # macOS/Linux
 pip install -r requirements.txt
-
-# .env.example을 참고해 .env를 로컬에 생성 (SECRET_KEY/DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT)
-# .env는 git에 커밋하지 않는다. MySQL 8.x가 로컬에 떠 있어야 하며 DB_SCHEMA.md 기준으로 DB/계정을 만든다
-
-python manage.py migrate
-python manage.py runserver        # http://localhost:8000, API는 /api/v1/, admin은 /admin/
 ```
 
-검증용 명령:
+**3) `.env` 작성** — `.env.example`을 복사해 채웁니다. DB 항목은 `compose.yaml`의 `db` 서비스 값과 짝을 이뤄야 합니다.
+
+```
+SECRET_KEY=아무-긴-랜덤-문자열
+DEBUG=True
+ALLOWED_HOSTS=
+
+DB_NAME=silvervision
+DB_USER=silver
+DB_PASSWORD=silverpw
+DB_HOST=127.0.0.1
+DB_PORT=3306
+```
+
+`.env`는 커밋하지 않습니다(`.gitignore` 대상).
+
+> `DEBUG`는 코드 기본값이 `False`입니다. `.env`에 `True`를 넣지 않으면 개발 중에도 오류 페이지가 나오지 않고, `ALLOWED_HOSTS`가 비어 있어 모든 요청이 400으로 막힙니다.
+
+**4) 마이그레이션과 초기 데이터**
 
 ```bash
-python manage.py check                       # 시스템 체크
-python manage.py makemigrations --check       # 누락된 마이그레이션 확인
-python manage.py test api                     # 전체 테스트 (82건)
+python manage.py migrate
+python manage.py seed_demo --with-alerts
+python manage.py runserver 0.0.0.0:8000    # API는 /api/v1/, admin은 /admin/
 ```
 
-운동 콘텐츠(`Exercise`) 등 마스터 데이터 시드는 없으므로 `/admin/`에서 직접 등록하기 전까지 `GET /exercises/`는 빈 배열을 반환합니다.
+`seed_demo`가 만드는 개발용 계정입니다(`DEBUG=True`에서만 동작).
+
+| 역할 | 아이디 | 비밀번호 |
+|---|---|---|
+| 시니어 | `silver99` | `1234` |
+| 보호자 | `guardian1` | `guardian1234` |
+
+두 계정은 서로 연동된 상태로 만들어지고, 운동 콘텐츠 4종과 응급 알림 4건(`--with-alerts`)이 함께 생성됩니다. 여러 번 실행해도 중복되지 않습니다. 운동 콘텐츠만 필요하면 `python manage.py seed_exercises`를 쓰세요.
+
+**검증용 명령**
+
+```bash
+python manage.py check                    # 시스템 체크
+python manage.py makemigrations --check   # 누락된 마이그레이션 확인
+python manage.py test api                 # 전체 테스트 (85건)
+```
 
 ### 5.2 프론트엔드 (`frontend/`)
 
 ```bash
 cd frontend
 npm install
-
-# .env.example을 .env로 복사 (EXPO_PUBLIC_API_BASE_URL — 미설정 시 http://localhost:8000/api/v1 로 폴백)
-# 실기기(Expo Go)로 테스트할 땐 localhost 대신 개발 PC의 LAN IP(예: 192.168.x.x)를 넣어야 폰에서 백엔드에 접속 가능하다
-# .env는 git에 커밋하지 않는다
-
-npx expo start          # Metro 개발 서버 — 터미널에서 android/ios/web 선택
-npx expo start --web    # 크롬 프리뷰
 npx tsc --noEmit        # strict TypeScript 타입 체크
+npx expo start --web    # 크롬 프리뷰 (카메라 화면 2개는 웹에서 동작하지 않음)
 ```
+
+**실기기 실행 — Expo Go가 아니라 개발 빌드(development build)가 필요합니다.** 카메라 기반 운동 자세 매칭·낙상 감지가 커스텀 네이티브 모듈(`react-native-vision-camera` + MediaPipe 프레임 프로세서 플러그인, `react-native-fast-tflite`)을 쓰기 때문에 Expo Go로는 실행되지 않습니다.
+
+```bash
+npx expo prebuild --clean       # app.json + plugins/withPoseDetector.js로 android/ 생성
+npx expo run:android            # USB로 연결된 Android 기기에 설치 + Metro 실행
+adb reverse tcp:8000 tcp:8000   # 폰의 localhost:8000 → 개발 PC 백엔드로 포워딩
+```
+
+`android/`는 저장소에 포함되어 있지 않으므로 clone 후 `prebuild`를 반드시 한 번 실행해야 합니다.
+
+`adb reverse` 덕분에 `.env` 없이 기본값(`http://localhost:8000/api/v1`)으로도 실기기에서 백엔드에 접속됩니다. 다른 주소를 쓰려면 `.env.example`을 `.env`로 복사해 `EXPO_PUBLIC_API_BASE_URL`을 지정하세요. 카메라를 쓰는 `ExerciseProgressScreen`·`PoseSmokeTestScreen`을 제외한 나머지 화면은 웹 프리뷰로 계속 확인할 수 있습니다.
 
 ### 5.3 흔한 오류
 
-- **`.gitignore`/`requirements.txt` 인코딩 문제**: 이 저장소에서 실제로 `.gitignore`가 UTF-16으로 저장되어 `.claude/` 등 패턴이 정상적으로 무시되지 않은 적이 있습니다(`fix/gitignore-encoding`). 텍스트 설정 파일은 UTF-8로 저장하세요. `requirements.txt`는 현재도 UTF-16이므로 편집 시 인코딩을 유지해야 합니다.
-- **MySQL 미기동**: 로컬 MySQL 8.x 서비스가 떠 있지 않으면 `migrate`/`runserver`/`test` 모두 DB 연결 오류로 실패합니다. `.env`의 `DB_HOST`/`DB_PORT`가 실제 MySQL 인스턴스를 가리키는지, 서비스가 기동되어 있는지 먼저 확인하세요.
+- **`adb reverse`가 USB 재연결로 사라짐**: `adb reverse`는 USB 세션에 묶여 있어 케이블을 뽑으면 규칙이 사라지고, 다시 꽂아도 자동 복구되지 않습니다. 앱이 갑자기 서버에 붙지 못하면 `adb reverse tcp:8000 tcp:8000`을 다시 실행하세요. Expo가 자동으로 걸어주는 것은 Metro 포트(8081)뿐입니다.
+- **DB 연결 오류**: `docker compose ps`로 `silvervision-mysql`이 떠 있는지, `.env`의 `DB_*` 값이 `compose.yaml`과 일치하는지 확인하세요. MySQL은 `127.0.0.1`에만 바인딩되어 있어 같은 PC에서만 접속됩니다.
+- **`GET /exercises/`가 빈 배열**: 운동 콘텐츠 마스터 데이터가 없는 상태입니다. `python manage.py seed_exercises`(또는 `seed_demo`)를 실행하세요. `docker compose down -v`로 볼륨을 지웠다면 계정도 함께 사라지므로 `seed_demo`를 다시 돌려야 합니다.
+- **모든 요청이 400**: `DEBUG=False`인데 `ALLOWED_HOSTS`가 비어 있는 경우입니다. `.env`를 확인하세요.
+- **`.gitignore` 인코딩 문제**: 이 저장소에서 실제로 `.gitignore`가 UTF-16으로 저장되어 `.claude/` 등 패턴이 정상적으로 무시되지 않은 적이 있습니다(`fix/gitignore-encoding`). 텍스트 설정 파일은 UTF-8로 저장하세요. `requirements.txt`는 현재도 UTF-16이지만 pip가 정상적으로 읽으므로 편집 시 인코딩만 유지하면 됩니다.
 
 ## 6. 소개자료 및 시연 영상
 

@@ -19,7 +19,8 @@
 백엔드가 하는 일은 **"이미 계산된 결과값을 저장·조회하는 API 제공"까지다.** 구체적으로:
 
 - `ExerciseSession`의 `completion_rate`/`accuracy_avg`: 클라이언트(AI 파트)가 계산해서 보낸 값을 검증 후 저장한다. 백엔드가 이 수치를 직접 계산하는 로직을 작성하지 않는다.
-- `PoseFeedback`의 `joint_name`/`deviation`: 클라이언트가 계산한 관절별 편차값을 그대로 저장한다. 각도 계산 공식이나 기준값 비교 로직을 백엔드에 구현하지 않는다.
+- `PoseFeedback`의 `joint_name`/`deviation`: 클라이언트가 계산한 관절별 편차값을 그대로 저장한다. 각도 계산 공식이나 기준값 비교 로직을 백엔드에 구현하지 않는다. **현재 프론트 호출자는 없다(휴면)** — 프론트 포즈 매처가 boolean만 반환해 넘길 실측 편차가 없어 `POST .../feedback/` 호출을 뺐다(AI 파트가 편차 계산을 제공하면 재연결). 엔드포인트·모델·시리얼라이저는 그대로 둔다.
+- `Exercise.pose_workout_key`(마이그레이션 `0007`, 2026-09-06): 프론트 카메라 자세 매칭이 "이 운동 = 어느 포즈 시퀀스"를 고르게 하는 **태그**만 저장한다. 시퀀스 정의·판정 로직은 프론트 `src/pose/exercise`가 소유하며 백엔드는 추론하지 않는다(경계 유지). `choices`는 프론트 `WORKOUT_POSE_SEQUENCES` 키와 정확히 일치해야 한다.
 - `EmergencyEvent`의 `event_type`/`detection_source`: 클라이언트(비전 모델/센서)가 감지해서 보낸 이벤트를 기록·전파(알림 발송 등)한다. 낙상/무활동을 판별하는 알고리즘 자체는 백엔드에 없다.
 
 애매한 경계에 있는 로직(예: "편차가 특정 임계값을 넘으면 이상 행동으로 간주"하는 임계치 로직이 백엔드/AI 중 어느 쪽 책임인지, 또는 낙상 감지 후 `emergency_event` 생성을 백엔드가 트리거해야 하는지 클라이언트가 트리거하는지)가 나오면, **임의로 판단해서 구현하지 말고 먼저 사용자에게 확인한다.**
@@ -35,7 +36,7 @@
 
 ### 모델 / 마이그레이션
 
-`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0006` MySQL 적용 및 컬럼/FK 검증 완료. 그 외 `token_blacklist` 앱이 자체 테이블 2개(`OutstandingToken`/`BlacklistedToken`)를 추가하나 라이브러리가 관리하며 `api` 앱 마이그레이션에는 영향이 없다(`makemigrations --check`는 여전히 "No changes").
+`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0007`(`0007` = `Exercise.pose_workout_key` 추가, null 허용) MySQL 적용 및 컬럼/FK 검증 완료. 그 외 `token_blacklist` 앱이 자체 테이블 2개(`OutstandingToken`/`BlacklistedToken`)를 추가하나 라이브러리가 관리하며 `api` 앱 마이그레이션에는 영향이 없다(`makemigrations --check`는 여전히 "No changes").
 
 ### 인증 / 권한 (구현 완료)
 
@@ -68,7 +69,7 @@
 | | PATCH | `senior/{senior_id}/missions/{mission_id}/` — status만 | `IsSeniorSelf` |
 | **기록** | GET·POST | `senior/{senior_id}/sessions/` — 목록 / 세션 시작 | GET `IsSeniorSelfOrMappedGuardian` / POST `IsSeniorSelf` |
 | | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` — GET은 `pose_feedback` nested / PATCH는 `completion_rate`·`accuracy_avg`(완료 시 fruit/ranking 갱신 트리거) | GET `IsSeniorSelfOrMappedGuardian` / PATCH `IsSeniorSelf` |
-| | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` — bulk 저장 | `IsSeniorSelf` |
+| | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` — bulk 저장 (⚠️ 현재 프론트 호출자 없음/휴면 — 3장 참고) | `IsSeniorSelf` |
 | | GET·POST | `senior/{senior_id}/activity-log/` — 기기 활동 로그. GET 최신순(기본 100·최대 500건, `?limit`/`?since`), POST 단건·bulk | GET `IsSeniorSelfOrMappedGuardian` / POST `IsSeniorSelf` |
 | | GET·POST | `senior/{senior_id}/ability-log/` — 장기 신체 능력(일별). GET `logged_date` 오름차순 전체, POST는 `(senior, logged_date)` upsert(신규 201 / 갱신 200) | `IsSeniorSelf` |
 | **응급** | GET·POST | `emergency/` — GET은 `IsSeniorOrGuardian` + `_visible_emergency_events`, POST는 `IsSenior`(시니어 본인만 생성) | (method별) |
@@ -94,7 +95,7 @@
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) 테스트 82건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) + `GET /exercises/` 응답의 `pose_workout_key`(포함·null 허용·choices 밖 값은 `full_clean()`에서 거부) 테스트 85건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 

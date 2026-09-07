@@ -2,6 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Dumbbell, Heart, Home, User } from 'lucide-react-native';
 import { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   colors,
   fontSizes,
@@ -34,7 +35,7 @@ export default function TabScreenLayout({ activeTab, children }: TabScreenLayout
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Universal Sticky Header */}
       <View style={styles.appHeader}>
         <Pressable onPress={handleGoHome} style={styles.wordmark}>
@@ -94,7 +95,7 @@ export default function TabScreenLayout({ activeTab, children }: TabScreenLayout
           </Text>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

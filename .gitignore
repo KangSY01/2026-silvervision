@@ -1,1 +1,50 @@
+# ===== 공통 =====
+.DS_Store
+*.log
+.idea/
+.vscode/
 .claude/
+
+# ===== Python / Django (backend) =====
+venv/
+.venv/
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+db.sqlite3
+db.sqlite3-*
+staticfiles/
+media/
+*.egg-info/
+
+# ===== Node / Expo / React Native (frontend) =====
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# ===== Native (Android/iOS) =====
+build/
+.gradle/
+.cxx/
+local.properties
+*.iml
+*.hprof
+*.jsbundle
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+
+VideoTensor/
+output_new_exercises/
