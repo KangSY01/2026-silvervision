@@ -14,15 +14,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **주의 — 문서 드리프트는 예상 못한 곳에서 생긴다**: "구현 현황/진행 상태"를 서술하는 절은 하위 `AGENTS.md`든 이 루트 문서든 실제 코드보다 뒤처지기 쉽다. 특정 하위 문서(예: `backend/AGENTS.md`, `frontend/AGENTS.md`)만 갱신 지시를 반복해서 받다 보면 정작 그 문서를 요약·인용하는 상위 문서(루트 `AGENTS.md`, 이 파일)가 갱신 대상에서 빠져 오히려 더 뒤처질 수 있다 — 2026-09-05 회귀 점검에서 실제로 backend/frontend `AGENTS.md`는 코드와 정확히 일치했지만, 그 둘을 요약한 루트 `AGENTS.md`의 "현재 진행 상태" 절이 뒤처져 있었다. 따라서 구현 현황은 어떤 문서도 100% 신뢰하지 말고, 항상 코드(`git log`, `backend/api/urls.py`, `frontend/src/screens/` 디렉터리, 테스트 실행 결과 등)로 교차검증할 것. 절을 갱신할 때는 그 절을 인용·요약하는 상위 문서가 있는지도 함께 확인해 같이 갱신한다.
 
-_마지막 전체 교차검증: 2026-09-05 (commit `1245a66` 기준) — 백엔드 엔드포인트 24개 전수 확인, `api/tests.py` 82건 전체 통과, 프론트 17개 화면 전체 API 연동 확인, 비전 연동 대기 지점(`// TODO(vision)` 등) 3곳(ExerciseProgressScreen·ExerciseFeedbackScreen·AlertDetailScreen) 확인. 이후 코드가 바뀌었다면 이 문단도 다시 신뢰할 수 없다._
-
-_2026-09-06 추가: 중간보고서 4.1절의 "장기 신체 능력 변화 추적 화면"이 누락돼 있어 `AbilityHistoryScreen`(시니어)을 신설했다 — 기존 `GET /senior/{id}/ability-log/` 조회 전용(SeniorHome에서 진입). 이로써 프론트 화면은 18개. `rom_score`/`completion_score`를 채우는 `POST`는 비전 파이프라인 미연동이라 보류했고(`AbilityHistoryScreen`에 `// TODO(vision)` 명시), 비전 연동 대기 지점은 4곳이 됐다. 백엔드 변경 없음._
+_마지막 전체 교차검증: 2026-09-06 (비전 갈래 ↔ 백엔드 갈래 병합) — 백엔드 엔드포인트 24개, `api/tests.py` 85건 전체 통과, 마이그레이션 `0001`~`0007`. 프론트 제품 화면 18개(`AbilityHistoryScreen` 포함) 전체 API 연동 + 개발 전용 `PoseSmokeTestScreen` 1개, `npx tsc --noEmit` 통과. 카메라 기반 운동 자세 매칭·낙상 감지가 `frontend/src/pose/`로 이식돼 운동 세션(`completion_rate`)·응급 이벤트(`POST /emergency/`)로 백엔드에 연결됨(frontend/AGENTS.md 9장). 남은 비전 연동 대기: `PoseFeedback.deviation`·`accuracy_avg`(matcher가 boolean만 반환 → `POST .../feedback/`는 프론트 호출자 없이 휴면), `AlertDetailScreen` 상세 타임라인(`TIMELINE`) 목업, `AbilityHistoryScreen` 기록 생성 `POST` 보류. 이후 코드가 바뀌었다면 이 문단도 다시 신뢰할 수 없다._
 
 이 문서는 두 영역을 아우르는 명령어와 아키텍처 요약만 다룬다. 화면 목록, 테이블 전체 목록 등 세부사항은 중복 기술하지 않으므로 위 문서를 참고할 것.
 
 ## 프로젝트 개요
 
-노년층(시니어)의 홈 트레이닝을 돕고 낙상·무활동 등 응급 상황을 보호자에게 알리는 서비스. Computer Vision 기반 자세 추정/분류(BlazePose)는 **이 저장소 밖에서 별도로 개발되는 세 번째 영역**이며, `frontend/`·`backend/` 어디에도 구현하지 않는다 — AI 관련 코드 추가 요청을 받으면 범위 밖임을 알리고 확인을 구한다.
+노년층(시니어)의 홈 트레이닝을 돕고 낙상·무활동 등 응급 상황을 보호자에게 알리는 서비스. Computer Vision 기반 자세 추정/분류(BlazePose)는 **이 저장소 밖에서 별도로 개발되는 세 번째 영역**(`VideoTensor` — 병합 전 저장소 `2026-silvervision-main/VideoTensor/`에 있는 프로토타입 앱)이며, `frontend/`·`backend/` 어디에도 새로 구현하지 않는다. 단, `VideoTensor`에서 실기기로 검증된 자세 매칭/낙상 감지 판정 로직(모델 학습·추론 자체는 제외)은 **사람이 직접 `frontend/src/pose/`로 포팅**하는 것이 이미 확립된 절차다 — 대응 관계와 동기화 체크리스트는 `frontend/docs/ASSEMBLY.md` 참고. 이 절차를 벗어난 AI 관련 코드 추가 요청을 받으면 범위 밖임을 알리고 확인을 구한다.
 
 ## 명령어
 
@@ -36,15 +34,18 @@ source venv/bin/activate          # macOS/Linux
 pip install -r requirements.txt
 
 # .env.example을 참고해 .env를 로컬에 생성 (SECRET_KEY/DB_NAME/DB_USER/DB_PASSWORD/DB_HOST/DB_PORT), git에 커밋하지 않는다
-# MySQL 8.x가 로컬에 떠 있어야 하며 DB_SCHEMA.md 기준으로 DB/계정을 만든다
+# DEBUG 코드 기본값은 False다 — 로컬 개발은 .env에 DEBUG=True를 넣어야 오류 페이지가 뜨고
+# ALLOWED_HOSTS 미설정이어도 요청이 400으로 막히지 않는다 (settings.py, .env.example 참고)
+# MySQL 8.x가 필요하다: 저장소 루트의 `docker compose up -d`(compose.yaml)로 띄우거나 로컬 설치.
+# DB/계정은 DB_SCHEMA.md 기준. `python manage.py seed_demo`로 개발용 계정·운동·알림 시드 가능
 
 python manage.py migrate
 python manage.py runserver        # http://localhost:8000, API는 /api/v1/, admin은 /admin/
 
 python manage.py check                       # 시스템 체크
 python manage.py makemigrations --check       # 누락된 마이그레이션 확인 (모델 변경 후 필수)
-python manage.py test                         # 전체 테스트 — api/tests.py는 빈 스텁이라 실행할 케이스 없음
-python manage.py test api.tests.ClassName.test_method   # 단일 테스트 (케이스 작성 후)
+python manage.py test                         # 전체 테스트 — api/tests.py 85건
+python manage.py test api.tests.ClassName.test_method   # 단일 테스트
 ```
 
 패키지를 새로 설치하면 `pip freeze > requirements.txt`로 갱신해 커밋에 포함한다. `requirements.txt`는 현재 UTF-16으로 저장돼 있으니 편집 시 인코딩을 유지한다.
@@ -58,12 +59,16 @@ cd frontend
 npm install
 
 # .env.example을 .env로 복사 (EXPO_PUBLIC_API_BASE_URL — 미설정 시 http://localhost:8000/api/v1 로 폴백).
-# 실기기(Expo Go)로 테스트할 땐 localhost 대신 개발 PC의 LAN IP를 넣는다. .env는 git에 커밋하지 않는다.
+# .env는 git에 커밋하지 않는다.
 
-npx expo start          # Metro 개발 서버 — 터미널에서 android/ios/web 선택
-npx expo start --web    # 크롬 프리뷰 (네이티브 전용 API를 쓰는 화면은 웹에서 다르게 보일 수 있음)
-npx expo start --android
-npx expo start --ios
+npx expo start --web    # 크롬 프리뷰 (카메라를 쓰는 ExerciseProgress/PoseSmokeTest는 웹에서 동작하지 않음)
+
+# 카메라 기반 포즈 기능(운동 매칭/낙상 감지)은 커스텀 네이티브 모듈이라 Expo Go로 실행할 수 없다.
+# 개발 빌드가 필요하며, android/ 네이티브 코드나 config plugin이 바뀌면 prebuild부터 다시 한다.
+npx expo prebuild --clean       # app.json + plugins/withPoseDetector.js로 android/ 생성
+npx expo run:android            # USB 연결된 기기에 debug APK 설치 + Metro 실행
+adb reverse tcp:8000 tcp:8000   # 폰의 localhost:8000 → 개발 PC 백엔드로 포워딩
+                                # (이 덕분에 .env를 기본값 그대로 둬도 실기기에서 백엔드에 닿는다)
 
 npx tsc --noEmit        # strict TypeScript 타입 체크 (별도 lint/test npm 스크립트는 정의되어 있지 않음)
 ```
@@ -83,13 +88,14 @@ npx tsc --noEmit        # strict TypeScript 타입 체크 (별도 lint/test npm 
 
 ## 프론트엔드 아키텍처
 
-- Expo(~54) + React Native + TypeScript(strict). **단일 flat native-stack 네비게이터** — 중첩 탭 네비게이터는 없다. `App.tsx`의 `Stack.Navigator`(`headerShown: false`) 아래 시니어/보호자 전체 화면이 평면적으로 등록되어 있고, 하단 탭바처럼 보이는 `TabScreenLayout`/`GuardianTabScreenLayout` 컴포넌트가 `navigation.navigate()`로 스택 이동을 흉내낸다(이미 스택에 있는 화면이면 pop, 없으면 push).
+- Expo(~55) + React Native + TypeScript(strict). **단일 flat native-stack 네비게이터** — 중첩 탭 네비게이터는 없다. `App.tsx`의 `Stack.Navigator`(`headerShown: false`) 아래 시니어/보호자 전체 화면이 평면적으로 등록되어 있고, 하단 탭바처럼 보이는 `TabScreenLayout`/`GuardianTabScreenLayout` 컴포넌트가 `navigation.navigate()`로 스택 이동을 흉내낸다(이미 스택에 있는 화면이면 pop, 없으면 push).
 - 화면별 route params는 [frontend/src/navigation/types.ts](frontend/src/navigation/types.ts)의 `RootStackParamList`에서 관리 — 새 화면/params 추가 시 이 파일부터 갱신한다.
-- **API 레이어는 [frontend/src/api/client.ts](frontend/src/api/client.ts) 하나**: `apiClient.{get,post,patch,delete}`, JWT access/refresh를 `AsyncStorage`에 저장하고 인증 요청에 자동 첨부, `ApiError`/`getApiErrorMessage`로 DRF 에러(`{detail}` 또는 `{field: [...]}`) 처리, 인증 요청에서 401이 오면 세션을 자동 삭제한다(refresh 재시도 없음 — 백엔드에 재발급 엔드포인트가 없어 재로그인시킨다). 응답 타입 인터페이스도 이 파일에 모으고 각 인터페이스 주석에 대응하는 백엔드 시리얼라이저를 명시한다. 연동 시 요청/응답 형식은 실제 `backend/api/serializers.py`·`views.py`에서 확인하고, 불명확하면 임의 가정 대신 사용자에게 확인한다.
-- 화면 간 공유 전역 상태는 [frontend/src/context/AppStateContext.tsx](frontend/src/context/AppStateContext.tsx)(`useAppState()` 훅)에 있다. 백엔드 연동은 **18개 화면 전체 완료**됐고(2026-09-06 `AbilityHistoryScreen` 추가), 대부분의 화면은 `AppStateContext` 대신 화면 로컬 상태(`useFocusEffect` 포커스 재조회)를 쓴다. `AppStateContext`에는 로그인·프로필 PATCH로 채워지는 `userProfile`/`guardianProfile`만 남고(`SeniorHome`/`GuardianHome` 인사말 등이 소비) 목업 상수는 `DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`(로그인 전 플레이스홀더)만 남았다. 상세는 [frontend/AGENTS.md](frontend/AGENTS.md) 7장. 백엔드 enum → 화면 표시 라벨 변환은 `Record<enum, label>` 타입으로 만들어 enum 확장 시 컴파일 타임에 누락이 드러나게 한다.
+- **API 레이어는 [frontend/src/api/client.ts](frontend/src/api/client.ts) 하나**: `apiClient.{get,post,patch,delete}`, JWT access/refresh를 `AsyncStorage`에 저장하고 인증 요청에 자동 첨부, `ApiError`/`getApiErrorMessage`로 DRF 에러(`{detail}` 또는 `{field: [...]}`) 처리, `auth: true` 요청에서 401이 오면 `POST /auth/token/refresh/`로 access token을 1회 재발급받아 재시도하고(동시 401은 `inFlightRefresh`로 1회 묶음), 그것마저 401이면 세션을 자동 삭제한다. `auth: false`(로그인/회원가입) 요청의 401은 자격 증명 오류라 재발급 없이 즉시 실패시킨다. 응답 타입 인터페이스도 이 파일에 모으고 각 인터페이스 주석에 대응하는 백엔드 시리얼라이저를 명시한다. 연동 시 요청/응답 형식은 실제 `backend/api/serializers.py`·`views.py`에서 확인하고, 불명확하면 임의 가정 대신 사용자에게 확인한다.
+- 화면 간 공유 전역 상태는 [frontend/src/context/AppStateContext.tsx](frontend/src/context/AppStateContext.tsx)(`useAppState()` 훅)에 있다. 백엔드 연동은 **제품 화면 18개 전체 완료**됐고(개발 전용 `PoseSmokeTestScreen` 별도), 대부분의 화면은 `AppStateContext` 대신 화면 로컬 상태(`useFocusEffect` 포커스 재조회)를 쓴다. `AppStateContext`에는 로그인·프로필 PATCH로 채워지는 `userProfile`/`guardianProfile`만 남고(`SeniorHome`/`GuardianHome` 인사말 등이 소비) 목업 상수는 `DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`(로그인 전 플레이스홀더)만 남았다. 상세는 [frontend/AGENTS.md](frontend/AGENTS.md) 7장. 백엔드 enum → 화면 표시 라벨 변환은 `Record<enum, label>` 타입으로 만들어 enum 확장 시 컴파일 타임에 누락이 드러나게 한다.
 - 디자인 소스는 이 레포 밖 형제 폴더 `../ai-studio-reference`(Google AI Studio 생성 웹 React+Tailwind 프로토타입)다 — 참고용일 뿐 실행 대상이 아니며, 그대로 복사하지 않고 RN으로 "포팅"한다(`div/span/button` → `View/Text/Pressable`, Tailwind → `StyleSheet`+theme 토큰, `lucide-react` → `lucide-react-native`, `hover` → `Pressable`의 `pressed` 스타일, `motion/react` 애니메이션은 우선 정적으로 구현).
 - 색상/폰트 크기/간격은 [frontend/src/theme/theme.ts](frontend/src/theme/theme.ts) 토큰만 사용하고 하드코딩하지 않는다. **시니어 UI 규칙**: 폰트 20pt 이상, 터치 타겟 56dp 이상(`theme.MIN_TOUCH_TARGET`).
 - 화면은 `src/screens/{common,senior,guardian}/`로 나뉘며 전체 포팅 완료 상태다 — 화면별 상세 현황은 frontend/AGENTS.md 표를 참고.
+- `src/pose/{exercise,fall}/`에 카메라 기반 운동 자세 매칭·낙상 감지 판정 로직이 구현되어 있다(`ExerciseProgressScreen`/`PoseSmokeTestScreen`에서 사용). `VideoTensor` 프로토타입에서 수동 포팅된 코드이며 위 "프로젝트 개요"의 AI 경계 예외에 해당한다 — 어떤 운동이 어느 시퀀스를 쓰는지는 백엔드 `Exercise.pose_workout_key`가 정한다. 자세한 내용은 frontend/AGENTS.md 9장 참고.
 
 ## 협업 규칙 요약
 

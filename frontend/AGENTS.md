@@ -8,17 +8,23 @@
 ## 2. Expo 버전 안내
 
 Expo HAS CHANGED — 코드를 작성하기 전에 반드시 정확한 버전별 문서를 확인할 것.
-현재 버전 기준 문서: https://docs.expo.dev/versions/v54.0.0/
+현재 버전 기준 문서: https://docs.expo.dev/versions/v55.0.0/
+
+**이 앱은 Expo Go로 실행되지 않는다.** 카메라 기반 포즈 기능(9장)이 커스텀 네이티브
+모듈을 쓰기 때문에 개발 빌드(development build)가 필요하다 — `npx expo prebuild`로
+`android/`를 생성한 뒤 `npx expo run:android`로 빌드·설치한다. 카메라를 쓰지 않는
+나머지 화면은 `npx expo start --web`의 웹 프리뷰로 계속 확인할 수 있다.
 
 ## 3. 기술 스택
 
-- Expo ~54.0.35 / React Native 0.81.5 / React 19.1.0 / TypeScript ~5.9.2 (strict)
+- Expo ~55.0.24 / React Native 0.83.10 / React 19.2.0 / TypeScript ~5.9.2 (strict)
 - `lucide-react-native` + `react-native-svg` — 아이콘 (ai-studio-reference의 `lucide-react` 아이콘을 동일 이름으로 대체)
 - `expo-linear-gradient` — 그라디언트 배경/버튼 (Tailwind의 `bg-gradient-*` 재현용)
 - 웹 프리뷰용: `react-dom`, `react-native-web`, `@expo/metro-runtime` — `npx expo start --web`으로 크롬에서 확인 가능 (네이티브 전용 API를 쓰는 화면은 웹에서 다르게 보일 수 있음)
 - `@react-navigation/native` + `@react-navigation/native-stack`, `react-native-screens`, `react-native-safe-area-context` — 네비게이션 도입 완료 (8장 참고)
 - `@react-native-async-storage/async-storage` — JWT access/refresh 토큰 저장 (`src/api/client.ts`)
 - 백엔드 통신은 `fetch` 기반 자체 클라이언트(`src/api/client.ts`) — 별도 HTTP 라이브러리 미도입
+- `react-native-vision-camera` + 커스텀 네이티브 프레임 프로세서 플러그인(`plugins/native/PoseDetectorPlugin.kt`, MediaPipe PoseLandmarker) — 카메라 프레임에서 33개 landmark 추출. `react-native-fast-tflite` — 낙상 감지 CNN(`assets/models/fall_cnn_quant.tflite`) 온디바이스 추론. `react-native-reanimated` + `react-native-worklets-core` — 프레임 프로세서 워클릿·오버레이 애니메이션. 전부 네이티브 모듈이라 Expo Go/웹에서는 동작하지 않고 `npx expo run:android` 빌드가 필요하다 (9장 참고)
 - 아직 미도입: `moti`(애니메이션, 필요 시 도입 검토)
 
 ## 4. 프로젝트 구조
@@ -37,10 +43,13 @@ frontend/
     context/AppStateContext.tsx  # userProfile, fruitsCollected 등 전역 상태 공유 (8장 참고)
     components/TabScreenLayout.tsx  # 홈/운동하기/개인정보 공통 헤더 + 하단 탭바 레이아웃
     theme/theme.ts                # colors / fontSizes / fontWeights / spacing / radius / MIN_TOUCH_TARGET 토큰
-    types/index.ts                # UserProfile, ActivityLevel 등 공용 타입
+    types/index.ts                # UserProfile, ActivityLevel, Workout, PoseWorkoutKey, ExerciseResult 등 공용 타입
+    pose/                         # 카메라 포즈 기능 로직 (9장) — exercise/(운동 매칭)·fall/(낙상 감지)·screenMapping.ts
+  plugins/                        # withPoseDetector.js(config plugin) + native/(PoseDetectorPlugin.kt, MediaPipe .task 모델)
+  assets/models|poses|pose-silhouettes/  # tflite 모델·기준 포즈 JSON·실루엣 PNG
 ```
 
-화면 컴포넌트에서 색상·폰트 크기·간격을 하드코딩하지 말고 항상 `src/theme/theme.ts` 토큰을 사용한다.
+화면 컴포넌트에서 색상·폰트 크기·간격을 하드코딩하지 말고 항상 `src/theme/theme.ts` 토큰을 사용한다. `src/pose/`와 `PoseSmokeTestScreen`은 `@/*`(→`./src/*`)·`@/assets/*` 경로 별칭을 쓴다(`tsconfig.json`의 `paths` + `babel.config.js`) — 나머지 화면은 기존대로 상대경로.
 
 ## 5. 디자인 소스 및 화면 구현 현황
 
@@ -63,10 +72,11 @@ frontend/
 | SignupScreen (회원가입) | SignupView.tsx | 완료 |
 | SeniorHomeScreen (시니어 홈) | HomeView.tsx | 완료 |
 | ExerciseSelectScreen (운동 선택) | WorkoutListView.tsx | 완료 |
-| ExerciseProgressScreen (운동 진행) | WorkoutActiveView.tsx | 완료 |
-| ExerciseFeedbackScreen (운동 피드백) | FeedbackView.tsx | 완료 |
+| ExerciseProgressScreen (운동 진행) | WorkoutActiveView.tsx | 완료 (카메라 포즈 매칭 + 낙상 감지 — 9장) |
+| ExerciseFeedbackScreen (운동 피드백) | FeedbackView.tsx | 완료 (result: ExerciseResult 소비, 정확도 편차 표시는 제거) |
 | ProfileScreen (개인정보) | ProfileView.tsx | 완료 |
 | AbilityHistoryScreen (건강 변화 추적) | - (중간보고서 4.1절) | 완료 (조회 전용, POST는 비전 연동 대기) |
+| PoseSmokeTestScreen (포즈 스모크 테스트) | - | 개발 전용, EntryScreen `__DEV__` 링크 (9장) |
 | VoiceAssistantModal (음성 어시스턴트) | - | 포팅 완료, 미마운트 (설계 미확정) |
 | GuardianLoginScreen (보호자 로그인) | GuardianLoginView.tsx | 완료 |
 | GuardianSignupScreen (보호자 회원가입) | GuardianSignupView.tsx | 완료 |
@@ -93,21 +103,22 @@ frontend/
 
 - 시니어 화면 9종 + 보호자 화면 9종 포팅 및 네비게이션(탭 전환, 뒤로가기 스택, 화면 간 실제 연결) 전체 완료됨
 - **백엔드 API 연동 — 18개 화면 전체 완료**:
-  - 공통 클라이언트 `src/api/client.ts` 구현 완료: `apiClient.{get,post,patch,delete}`, JWT access/refresh를 `AsyncStorage`에 저장·자동 첨부, `ApiError`/`getApiErrorMessage`(+ register 필드 에러 전용 `getRegisterErrorMessage`), 인증 요청 401 시 세션 클리어(refresh 재시도 없음 — 백엔드에 재발급 엔드포인트 없음). 응답 타입 인터페이스도 이 파일에 모으고 각 인터페이스 주석에 대응 백엔드 시리얼라이저를 명시.
-  - 연동 완료: `LoginScreen`(시니어 로그인+프로필 조회), `GuardianLoginScreen`(보호자 로그인+프로필 조회), `SignupScreen`·`GuardianSignupScreen`(`POST /auth/{role}/register/` → 같은 자격 증명으로 `POST /auth/{role}/login/` 이어붙여 가입 즉시 로그인·홈 진입 — 아래 항목), `ExerciseSelectScreen`(`GET /exercises/`), `SeniorHomeScreen`(포커스마다 `GET /senior/{id}/` fruit_count + `GET /senior/{id}/ranking/`), `ExerciseProgressScreen`·`ExerciseFeedbackScreen`(운동 세션: 진입 시 미션 자동 생성→세션 시작, 결과 화면에서 완료 PATCH + `feedback/` POST), `GuardianHomeScreen`(포커스마다 `GET /guardian/{id}/seniors/` — 등록 인원수 + 이름 칩), `AddSeniorScreen`(`POST /guardian/{id}/seniors/` — 조회+등록 동시), `AlertHistoryScreen`·`AlertDetailScreen`(`GET /emergency/` 목록·`GET /emergency/{id}/` 상세·`PATCH` 상태 변경), `GuardianActivityListScreen`(포커스마다 피보호자별 대시보드 집계 — 아래 항목), `SeniorDetailScreen`(포커스마다 `GET /senior/{id}/` + `.../sessions/` + `GET /exercises/` + `GET /emergency/` 병렬, `DELETE /guardian/{gid}/seniors/{sid}/` 연동 해제 — 아래 항목), `GuardianProfileScreen`(포커스마다 `GET /guardian/{id}/` + `.../seniors/` 병렬, 필드별 인라인 수정 `PATCH /guardian/{id}/`, `DELETE .../seniors/{sid}/` — 아래 항목), `ProfileScreen`(시니어 개인정보: 포커스마다 `GET /senior/{id}/`, 전체 편집 모드 토글로 6개 필드 일괄 `PATCH /senior/{id}/`, `barcode_code` 표시 — 아래 항목).
+  - 공통 클라이언트 `src/api/client.ts` 구현 완료: `apiClient.{get,post,patch,delete}`, JWT access/refresh를 `AsyncStorage`에 저장·자동 첨부, `ApiError`/`getApiErrorMessage`(+ register 필드 에러 전용 `getRegisterErrorMessage`), `auth: true` 요청의 401은 `POST /auth/token/refresh/`로 access token을 1회 재발급받아 재시도하고(동시 401은 `inFlightRefresh`로 1회 묶음) 그것마저 실패해야 세션을 클리어한다 — `auth: false`(로그인/회원가입)의 401은 자격 증명 오류라 재발급 시도 없이 즉시 실패. 응답 타입 인터페이스도 이 파일에 모으고 각 인터페이스 주석에 대응 백엔드 시리얼라이저를 명시.
+  - 연동 완료: `LoginScreen`(시니어 로그인+프로필 조회), `GuardianLoginScreen`(보호자 로그인+프로필 조회), `SignupScreen`·`GuardianSignupScreen`(`POST /auth/{role}/register/` → 같은 자격 증명으로 `POST /auth/{role}/login/` 이어붙여 가입 즉시 로그인·홈 진입 — 아래 항목), `ExerciseSelectScreen`(`GET /exercises/`), `SeniorHomeScreen`(포커스마다 `GET /senior/{id}/` + `GET /senior/{id}/ranking/` — 건강 나무는 `fruit_count` 누적이 아니라 `today_completed`/`daily_goal`(오늘 진행도)로 그린다), `ExerciseProgressScreen`·`ExerciseFeedbackScreen`(운동 세션: 진입 시 미션 자동 생성→세션 시작, 결과 화면에서 완료 PATCH — 카메라 파이프라인·`feedback/` 휴면은 9장), `GuardianHomeScreen`(포커스마다 `GET /guardian/{id}/seniors/` + `GET /emergency/` 병렬 — 등록 인원수, 정상/확인필요 분류(`isAlertClosed` 기준, AlertHistory와 동일), 최근 알림 2건 피드), `AddSeniorScreen`(`POST /guardian/{id}/seniors/` — 조회+등록 동시), `AlertHistoryScreen`·`AlertDetailScreen`(`GET /emergency/` 목록·`GET /emergency/{id}/` 상세·`PATCH` 상태 변경), `GuardianActivityListScreen`(포커스마다 피보호자별 대시보드 집계 — 아래 항목), `SeniorDetailScreen`(포커스마다 `GET /senior/{id}/` + `.../sessions/` + `GET /exercises/` + `GET /emergency/` 병렬, `DELETE /guardian/{gid}/seniors/{sid}/` 연동 해제 — 아래 항목), `GuardianProfileScreen`(포커스마다 `GET /guardian/{id}/` + `.../seniors/` 병렬, 필드별 인라인 수정 `PATCH /guardian/{id}/`, `DELETE .../seniors/{sid}/` — 아래 항목), `ProfileScreen`(시니어 개인정보: 포커스마다 `GET /senior/{id}/`, 전체 편집 모드 토글로 6개 필드 일괄 `PATCH /senior/{id}/`, `barcode_code` 표시 — 아래 항목).
 
   **→ 18개 화면 전체 API 연동 완료**(`EntryScreen`은 조회 대상이 없는 진입 화면). `VoiceAssistantModal`만 설계 미확정으로 미마운트. `AppStateContext`에는 로그인·프로필 PATCH로 채워지는 `userProfile`/`guardianProfile`만 남고 목업 상수는 전부 제거됐다.
-  - **`AbilityHistoryScreen` 연동**(2026-09-06 신설, 중간보고서 4.1절 "장기 신체 능력 변화 추적 화면" 누락분): 포커스마다 `GET /senior/{id}/ability-log/`(하루 1건, `logged_date` 오름차순) 조회. `SeniorHomeScreen` 나무 카드 아래 진입 카드에서 들어간다. 최근 2주 창의 `rom_score`(관절 가동범위)·`completion_score`(동작 완성도)를 지표 토글 + 꺾은선 그래프로 보여주고, 값 없는 날은 점을 생략(SeniorDetailScreen 원칙)하며 기록이 아예 없으면 빈 상태 안내. **`POST`(기록 생성)는 이번 배치에서 보류** — 두 점수는 비전(자세 추정) 파생 지표인데 파이프라인 미연동이고, 유일한 후보 소스인 `ExerciseSession.accuracy_avg` 자체가 `ExerciseFeedbackScreen`의 고정 placeholder(`SCORE = 87`)라 그 평균을 쓰면 매일 같은 상수가 찍혀 "없는 데이터를 지어내지 않는다" 원칙에 어긋난다. `completion_rate`(타이머 경과율)는 실제 값이지만 "동작 완성도"와 의미가 달라 이 추세선에 섞지 않는다. 연동 훅 지점은 `AbilityHistoryScreen` 하단 `// TODO(vision)` 주석에 명시(`ExerciseFeedbackScreen` 세션 완료 PATCH 직후 실측값으로 upsert POST).
+  - **`AbilityHistoryScreen` 연동**(2026-09-06 신설, 중간보고서 4.1절 "장기 신체 능력 변화 추적 화면" 누락분): 포커스마다 `GET /senior/{id}/ability-log/`(하루 1건, `logged_date` 오름차순) 조회. `SeniorHomeScreen` 나무 카드 아래 진입 카드에서 들어간다. 최근 2주 창의 `rom_score`(관절 가동범위)·`completion_score`(동작 완성도)를 지표 토글 + 꺾은선 그래프로 보여주고, 값 없는 날은 점을 생략(SeniorDetailScreen 원칙)하며 기록이 아예 없으면 빈 상태 안내. **`POST`(기록 생성)는 여전히 보류** — 두 점수는 비전(관절 각도) 파생 지표인데, 현재 `ExerciseSession`이 저장하는 `accuracy_avg`/`completion_rate`는 둘 다 "단계 통과율"이라(9장 — matcher가 boolean만 반환) "관절 가동범위"·"동작 완성도"와 의미가 달라 그대로 쓰면 "없는 데이터를 지어내지 않는다" 원칙에 어긋난다. matcher가 각도 편차를 함께 반환하도록 확장돼야 실측 소스가 생긴다. 연동 훅 지점은 `AbilityHistoryScreen` 하단 `// TODO(vision)` 주석에 명시(`ExerciseFeedbackScreen` 세션 완료 PATCH 직후 실측값으로 upsert POST).
   - **회원가입 연동 흐름**(`SignupScreen`·`GuardianSignupScreen`): register 엔드포인트는 토큰 없이 프로필(`Senior/GuardianProfileSerializer`)만 주므로, 성공 시 폼에 입력한 같은 자격 증명으로 곧바로 `POST /auth/{role}/login/`을 호출해 `persistSessionFromLoginResponse`(로그인 배치와 동일)로 세션을 저장하고 홈으로 `navigate`한다(가입 즉시 홈 진입하는 기존 목업 UX 유지). 프로필은 register 응답을 그대로 써 `AppStateContext`(`userProfile`/`guardianProfile`)에 채운다(추가 GET 없음). `GuardianSignupScreen`의 `guardianProfile` 프리필·평문 pw 상태는 목업 잔재라 제거하고 데모 기본값으로 대체. **비밀번호 검증은 전송 전 클라이언트에서 먼저 한다** — 시니어는 `number-pad`+`maxLength=4`에 더해 `/^\d{4}$/` 재검사(붙여넣기 대비, 문구는 로그인 화면 "숫자 4자리"와 통일), 보호자는 `8자 이상 && 영문 && 숫자`(서버 `min_length` 위반 메시지가 DRF 영문 기본값이라 노출하지 않고 한국어로 안내). 서버 에러는 `client.ts`의 `getRegisterErrorMessage`로 처리 — `{ login_id: [...] }`(중복 아이디, 영문 기본 메시지) 는 "이미 사용 중인 아이디입니다"로 고정, 그 외는 `getApiErrorMessage` fallback.
-  - **운동 세션 연동 흐름**: `ExerciseProgressScreen` mount → `POST /senior/{id}/missions/`(scheduled_at=now, `senior`는 `ExerciseMissionCreateSerializer`가 필수라 본인 id를 body에 실음) → `POST /senior/{id}/sessions/`(`{mission}`, session_id를 ref에 보관). 타이머 완료/건너뛰기 → `ExerciseFeedback`로 `sessionId`+`completionRate`(타이머 경과율) 전달. `ExerciseFeedbackScreen` mount → `PATCH .../sessions/{id}/`(`completion_rate`=경과율, `accuracy_avg`=화면 표시 점수 87) + `POST .../feedback/`(고정 placeholder 배열). **`accuracy_avg`·`completion_rate`·`deviation`은 전부 `// TODO(vision)` 주석이 달린 임시값** — 비전 파이프라인 연결 지점이다. X 버튼 이탈은 `goBack()`만 하고 세션을 미완료(completion_rate=null)로 남긴다(백엔드가 완료로 집계하지 않음).
+  - **운동 세션 연동 흐름**(카메라 파이프라인 자체는 9장): `ExerciseProgressScreen` mount → `POST /senior/{id}/missions/`(scheduled_at=now, `senior`는 `ExerciseMissionCreateSerializer`가 필수라 본인 id를 body에 실음) → `POST /senior/{id}/sessions/`(`{mission}`, session_id를 ref에 보관). StrictMode/개발 모드 중복 호출은 `sessionStartRequestedRef`(effect 진입 즉시 세우는 동기 가드)가 막는다. 시퀀스 완주 시 자동, 또는 `__DEV__` 건너뛰기 버튼 → `ExerciseFeedback`로 `sessionId` + `result: ExerciseResult`(`ExercisePipeline`이 집계한 `completedSteps`/`totalSteps`/`elapsedMs`) 전달. `ExerciseFeedbackScreen` mount → `PATCH .../sessions/{id}/`(`completion_rate`·`accuracy_avg` 둘 다 `completedSteps/totalSteps` 비율 — 아래 참고) 후 응답(`ExerciseSessionCompleteResponse`의 `fruit_awarded`/`fruit_count`/`today_completed`/`daily_goal`)으로 결과·열매 카드를 그린다(프론트가 임의로 "+1"을 띄우지 않고 `fruit_awarded`를 따른다). X 버튼 이탈은 `goBack()`만 하고 세션을 미완료(completion_rate=null)로 남긴다(백엔드가 완료로 집계하지 않음).
+    - **`POST /senior/{id}/sessions/{id}/feedback/` 엔드포인트는 현재 프론트 호출자가 없다(휴면).** `ExerciseFeedbackScreen`이 예전엔 placeholder 편차값(`PoseFeedback.deviation`)을 보냈으나, `src/pose/exercise/matcher.ts`의 `matchesPose()`가 boolean만 반환해 실측 관절별 편차가 없어 호출을 제거했다. AI 파트가 관절별 편차 계산을 제공하면 이 엔드포인트에 다시 연결한다. 같은 이유로 `accuracy_avg`도 지금은 `completion_rate`와 같은 값(단계 통과율)이다.
   - **보호자 피보호자 등록 흐름**: 백엔드에 검색 전용 엔드포인트가 없어 `POST /guardian/{id}/seniors/`가 조회+등록을 한 번에 처리한다(`registered_via: id_search | barcode` + `login_id | barcode_code`). `AddSeniorScreen`은 "검색" 버튼이 곧바로 POST를 호출하고, 404(일치 없음)/409(이미 등록됨)를 각각 다른 문구로 구분한다. 바코드 스캔은 실제 카메라(expo-camera 등) 미도입 — 레이저 애니메이션은 연출로 유지하고 스캐너 모달에서 바코드 코드를 직접 입력받아 `barcode_code`로 보낸다.
   - **`GuardianActivityListScreen` 대시보드 집계**(포커스마다 재조회, `AppStateContext` 미사용·화면 로컬 상태): `GET /guardian/{id}/seniors/` + `GET /emergency/`를 병렬로 부르고, 이어서 피보호자별로 `GET /senior/{seniorId}/sessions/` + `GET /senior/{seniorId}/activity-log/?since=<오늘 0시 ISO>`를 `Promise.all`로 병렬 호출한다(인원 2~5명 규모라 순차는 지연이 인원수만큼 곱해지고, 병렬 호출 부담은 무시 가능). 실패는 GuardianHome/AlertHistory와 동일하게 화면 전체 error 상태(all-or-nothing).
     - **이번 주 운동 횟수** = `completion_rate !== null`(백엔드가 완료 PATCH 시에만 채움)이고 `created_at`이 이번 주(월요일 0시~현재, 기기 로컬 시각) 안인 세션 수.
     - **상태 우선순위**(카드 색·문구, 위에서부터): ① `fall_suspected` — `emergency.ts`의 `hasActiveFallAlert`(해당 senior의 `event_type === 'fall'` && 미종결(`false_alarm`/`resolved` 아님) 이벤트 존재). ② `not_connected_today` — 오늘 0시 이후 활동 로그 0건 && 오늘 완료 세션 0건. ③ `workout_done_today` — 오늘 완료 세션 ≥ 1. ④ `connected_today`(기본). 낙상은 유일한 생명·안전 신호라 하위 신호에 가려지면 안 되고, "미접속"(오늘 상태 확인 불가)은 무활동 감지 서비스의 핵심 우려라 "운동 안 함"보다 앞선다. 오늘 완료 세션이 있으면 그 자체를 "오늘 접속"의 증거로 인정해(기기 활동 로깅 미연동 환경 대비) `not_connected` 오판을 막는다.
     - **벨 아이콘 빨간 점**(`hasCriticalAlert`) = `emergency.ts`의 `isNotifiedAlert`로 `GET /emergency/` 결과에 `status === 'notified'`(보호자에게 전송됐고 아직 미종결) 이벤트가 하나라도 있는지. seniors 배열이 아니라 실제 응급 목록 기준.
   - **`SeniorDetailScreen` 연동**(포커스마다 재조회, 화면 로컬 상태 — `AppStateContext` 미사용): `GET /senior/{id}/`(방금 매핑된 보호자 GET 허용된 프로필) + `.../sessions/` + `GET /exercises/`(세션 목록엔 운동 이름이 nested 안 돼 `exercise_id→name` 맵을 별도 구성) + `GET /emergency/`(응답을 `event.senior === seniorId`로 한 번 더 좁힘)를 `Promise.all` 병렬. route param `seniorId`는 문자열이라 `Number()`로 변환.
-    - **"주간 활동 시간(분)" 차트 → "주간 운동 횟수"로 대체**: `ExerciseSession`에 소요시간 필드 자체가 없다(`completion_rate`/`accuracy_avg`만). 지난 배치(ExerciseSelect의 `duration` 제거)와 같은 원칙으로 없는 데이터를 지어내지 않고, 실제로 있는 값인 **날짜별 완료 세션 수**를 막대 높이로 쓰고 탭/헤더 라벨을 "주간 운동 횟수"·"최근 7일간 완료한 운동"·"주간 누적: N회"로 바꿨다. 완료 세션이 0건인 주는 차트 대신 안내 문구.
-    - **"관절 동작 완성도(%)" 차트**: 최근 7일 날짜별 `accuracy_avg` 평균(값이 있는 세션만 — 완료돼도 `accuracy_avg`가 null이면 그 날은 데이터 없음으로 점 생략). 목표선 80%는 피보호자 데이터가 아닌 고정 기준선이라 유지. 값 있는 날이 0이면 안내 문구.
+    - **"주간 운동 횟수" 막대 차트**(원본의 "주간 활동 시간(분)" 대체): `ExerciseSession`에 소요시간 필드가 없어(`completion_rate`/`accuracy_avg`만) 없는 데이터를 지어내지 않고 **날짜별 완료 세션 수**를 막대 높이로 쓴다. 헤더 라벨은 "최근 7일간 완료한 운동"·"주간 누적: N회". "하루 목표 N회" 점선 기준선을 함께 그린다(`DAILY_GOAL = 6`, 백엔드 `FRUIT_DAILY_CAP`과 같은 값 — 피보호자 데이터가 아닌 고정 기준, 목표선이 항상 보이도록 스케일 하한도 이 값). 완료 세션 0건인 주는 차트 대신 안내 문구.
+    - **"관절 동작 완성도(%)" 트렌드 차트는 제거했다**(활동/정확도 탭 스위처도 함께 제거 — 이제 막대 차트 하나만). 실측 accuracy 값이 없어(`accuracy_avg`가 항상 87 또는 항상 100에 가까워 평평한 선만 그려 정보량 없음, `ExerciseFeedbackScreen`의 placeholder 제거와 동일 논리) 뺐다. 비전 파트가 관절 각도 기반 실측 정확도를 제공하면 재도입을 검토한다.
     - **"오늘 수행 운동 내역"**: 오늘 0시 이후 `created_at` + `completion_rate` 채워진 세션, `exercise_id`→이름 매핑, 시각은 `created_at` 그대로(완료 전용 타임스탬프 없음 — 세션 배치와 일관).
     - **"거동 안전 및 이상 감지 기록"**: 이 senior 소속 emergency만, `emergency.ts`의 `EMERGENCY_TYPE_LABELS`/`EMERGENCY_STATUS_LABELS`/`isAlertClosed`/`formatEmergencyTimestamp` 재사용. 종결(`resolved`) 이벤트는 카드/뱃지를 중립 톤으로.
     - **"보호 등급"**: `mobility_level`→한글 라벨. `LoginScreen`에만 있던 `MOBILITY_LEVEL_TO_ACTIVITY_LEVEL`을 `src/labels.ts`(신규, `types/index.ts`·`api/client.ts` 인근의 공용 라벨 모듈)로 옮겨 시니어·보호자 화면이 공유. 같은 매핑을 화면마다 중복 정의하지 않기 위함.
@@ -124,7 +135,7 @@ frontend/
     - **`name`/`phone`/`address` 비우기 방지**: 백엔드 `CharField`(blank 불가)라 전송 전 클라이언트에서 `trim()` 후 빈 값이면 `Alert.alert`로 막는다. `diseases`/`medication`은 `TextField(blank=True)`라 빈 값 허용.
     - **바코드 표시**: 하단 "안심 바코드" 캡션과 요약 카드 "실버비전 매칭 코드"의 하드코딩(`SV-9982`, `9982-1234-5678-SILVER`)을 실제 `barcode_code`로 교체. 값은 `uuid4().hex.upper()` = 대시 없는 32자리 대문자 hex라, 어르신이 보호자에게 불러주거나 눈으로 대조하기 쉽도록 `formatBarcodeCode()`로 8자리씩 4묶음(`XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX`)으로 끊어 표시(원본 목업의 4묶음 표기와 같은 형태). 요약 카드는 라벨/값을 두 줄로 분리해 줄바꿈이 지저분하지 않게 함.
     - **`AppStateContext.alerts` 제거**: `AlertHistory`/`AlertDetail`이 `GET /emergency/`로 연동된 뒤 아무도 안 써서 `alerts`/`setAlerts`/`DEFAULT_ALERTS` 및 `types/index.ts`의 구 `EmergencyEvent` 인터페이스(`type: 'fall' | 'injury'`, 한글 status — `api/client.ts`의 `EmergencyEventResponse`와 별개)까지 삭제. 이로써 `AppStateContext` 목업 상수는 전부 정리됨(`DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`은 로그인 전 플레이스홀더라 유지).
-  - `GuardianHomeScreen`의 "정상/확인 필요" 상태 칩은 제거했다 — 그 판정은 응급 이벤트·활동 로그가 필요한데(`AlertHistoryScreen` 연동 배치 예정) 임의 규칙으로 색을 칠하면 허위 안심을 줄 수 있어, 이번엔 등록 피보호자 이름만 나열한다. "최근 알림·활동 피드" 카드도 같은 이유로 안내 문구만 남겼다.
+  - `GuardianHomeScreen`의 "정상 / 확인 필요" 상태 칩과 "최근 알림·활동 피드" 카드는 실제 `GET /emergency/` 데이터로 채운다 — "확인 필요"는 미종결(`isAlertClosed`가 false) 이벤트를 가진 피보호자, 피드는 `created_at` 내림차순 최근 2건(종결=초록/대응 중=주황). 판정 기준을 `AlertHistoryScreen`의 '미확인' 필터와 똑같이 맞춰 두 화면의 숫자가 어긋나지 않는다. (초기 배치에서 임의 규칙 대신 이름만 나열했던 것을, 응급 연동이 끝나 실데이터로 대체.)
   - **응급 알림 연동**: `src/screens/guardian/emergency.ts`에 status(5종)/event_type(3종) 라벨 Record + 필터 분류 + 전이 판정 + 신호 헬퍼(`isNotifiedAlert`, `hasActiveFallAlert`)를 모았다(`AlertHistory`/`AlertDetail`/`GuardianActivityList` 공용). `EmergencyEventSerializer.senior`가 PK만 주므로 Alert 두 화면은 `GET /guardian/{id}/seniors/`를 함께 불러와 `senior_id → 이름` 맵을 만든다. 목록 필터: `detected/first_check/notified` = "미확인", `false_alarm/resolved` = "확인완료". **`AlertDetailScreen` 액션은 "상황 확인 완료"(→`resolved`) 하나만 실제 동작**한다 — 백엔드 `EMERGENCY_EVENT_TRANSITIONS`(배포·검증 완료, 미변경)상 `notified→false_alarm`("오보 처리")·`resolved→*`("미확인 재지정")가 불가해 두 버튼은 UI에서 제거했다. `notified/false_alarm` 상태만 버튼 노출, `resolved`는 종결 배너, 그 외(`detected/first_check`)는 안내 문구. `TIMELINE`·스켈레톤 리플레이 SVG·"CRITICAL ACCELERATION" 등 상세 분석 시각화는 비전팀 몫이라 목업 유지.
   - 데이터 연동은 전 화면 완료. 남은 API 작업은 백엔드 미구현 항목 대기뿐(비밀번호 변경 → `GuardianProfileScreen` 비밀번호 행, 음성 인식 → `VoiceAssistantModal`). API 스펙은 `backend/AGENTS.md` 5장 표 또는 실제 `backend/api/serializers.py`·`views.py`에서 확인하고, 불명확하면 임의 가정 대신 확인.
   - 백엔드 enum → 화면 표시 라벨 변환은 `Record<enum, label>` 타입으로 만들어 enum 확장 시 컴파일 타임에 누락이 드러나게 한다(`ExerciseSelectScreen`의 `DIFFICULTY_LABELS` 참고).
@@ -163,3 +174,28 @@ Entry (진입)
 두 경우 모두 `useRoute<RouteProp<RootStackParamList, '화면명'>>()`으로 타입을 좁혀서 사용한다.
 
 **전역 상태 (`AppStateContext`)**: [src/context/AppStateContext.tsx](src/context/AppStateContext.tsx)는 `App.tsx`에서 `NavigationContainer` 바깥, `SafeAreaProvider` 안쪽에 `AppStateProvider`로 마운트되어 화면 간 공유가 필요한 상태(`userProfile`, `guardianProfile`)를 보관한다. 화면 컴포넌트에서는 `useAppState()` 훅으로 접근한다(`AppStateProvider` 밖에서 호출하면 에러 발생). API 연동은 전 화면 완료됐고(7장), 대부분의 화면은 `AppStateContext` 대신 화면 로컬 상태(`useFocusEffect`로 포커스마다 재조회)를 쓴다 — `userProfile`/`guardianProfile`은 로그인 시 채워지고 각 프로필 화면(`ProfileScreen`/`GuardianProfileScreen`)의 수정 PATCH 성공 시 변경 필드만 merge되며, `SeniorHome`/`GuardianHome`의 인사말·`VoiceAssistantModal`의 열매 개수처럼 화면 로컬 조회로 덮기 애매한 소비처가 이 둘을 읽는다. 목업 상수(`DEFAULT_SENIORS`/`DEFAULT_ALERTS` 등)는 연동 완료로 전부 제거됐고 `DEFAULT_PROFILE`/`DEFAULT_GUARDIAN`만 로그인 전 플레이스홀더로 남아 있다. 로그인 세션 자체는 `src/api/client.ts`가 `AsyncStorage`로 관리한다. 화면 간 1회성 전달 데이터는 `RootStackParamList` params를 우선 사용한다.
+
+## 9. 카메라 기반 포즈 기능 (운동 매칭 · 낙상 감지)
+
+**출처와 이식 절차**: 이 기능은 루트 CLAUDE.md/AGENTS.md가 말하는 "AI 모델은 frontend/backend에 구현하지 않는다"는 원칙의 유일한 예외다. 별도 Expo 프로토타입 앱 `VideoTensor`에서 실기기로 튜닝·검증한 로직을, 사람이 직접 `src/pose/`로 옮겨 심는다(자동 동기화 아님). 대응 파일 목록·차이점·동기화 체크리스트는 [docs/ASSEMBLY.md](docs/ASSEMBLY.md)에 있으며, 로직을 고칠 때는 그 문서의 절차를 따른다. `VideoTensor` 본체는 이 저장소에 없고 병합 전 저장소 `2026-silvervision-main/VideoTensor/`에 있다.
+
+**구조**:
+- `src/pose/exercise/`(운동 자세 매칭) — 카메라 landmark로부터 관절 각도를 계산(`geometry.ts`)해 `WORKOUT_POSE_SEQUENCES`(`constants.ts`)에 정의된 운동별 포즈 시퀀스와 비교(`matcher.ts`)하고, 매칭되면 홀드 타이머를 굴리는 상태 머신(`pipeline.ts`의 `ExercisePipeline`)이다. 기준 포즈는 `assets/poses/*.json`에서 온다(`scripts/convert-pose-json.mjs`로 변환).
+- `src/pose/fall/`(낙상 감지) — MediaPipe landmark 스트림을 100ms 격자로 리샘플(`resampler.ts`)해 53개 특징을 뽑고(`features.ts`), `assets/models/fall_cnn_quant.tflite`로 추론한 확률을 연속 판정 상태 머신(`decision.ts`의 `FallDetector`)에 통과시켜 `idle → candidate → fallen`을 결정한다(`pipeline.ts`의 `FallPipeline`).
+- 실제 카메라 프레임 → landmark 추출은 네이티브 쪽(`react-native-vision-camera` + `plugins/native/PoseDetectorPlugin.kt`의 MediaPipe PoseLandmarker)이 담당하며, 위 두 파이프라인은 이미 추출된 landmark를 입력으로만 받는다 — 모델 학습이나 BlazePose 추론 자체를 이 폴더에 새로 구현하지 않는다.
+
+**네이티브 빌드가 필수인 이유** (Expo Go로 대체 불가, 각각 독립적으로 막힌다):
+1. `plugins/withPoseDetector.js`(config plugin)가 `MainApplication.kt`에 프레임 프로세서 `"detectPose"`를 등록하고, `build.gradle`에 MediaPipe 의존성을 넣고, Kotlin 소스·`.task` 모델을 생성된 `android/`에 복사한다. prebuild 단계에서 네이티브 코드를 고치는 물건이라 Expo Go에서 실행될 수 없다. `app.json`의 `android.package`가 없으면 이 플러그인이 명시적으로 throw한다.
+2. `react-native-vision-camera`·`react-native-fast-tflite`·`react-native-worklets-core`는 Expo Go 번들에 없는 서드파티 네이티브 모듈이다.
+3. `.task` 모델이 APK 패키징 시 압축되면 PoseLandmarker 네이티브 로딩이 런타임에 실패한다 — 플러그인이 넣는 `noCompress "task"` gradle 설정은 JS 레벨에서 우회할 수 없다.
+4. `metro.config.js`가 `.tflite`를 에셋 확장자로 등록하고, `babel.config.js`가 worklets/reanimated 플러그인을 건다.
+
+**백엔드 연결**:
+- 어떤 운동이 어느 포즈 시퀀스를 쓰는지는 백엔드 `Exercise.pose_workout_key`가 정한다. `ExerciseSelectScreen`이 이 값을 `Workout.poseWorkoutKey`로 옮기고, 값이 비어 있는 운동은 목록에서 제외한다(`__DEV__` 경고). 값은 `WORKOUT_POSE_SEQUENCES`의 키와 일치해야 한다.
+- `ExerciseProgressScreen`은 진입 시 미션→세션을 자동 생성하고(2단계 POST), 완료 시 `ExercisePipeline`이 집계한 단계 진행률을 `ExerciseResult`로 결과 화면에 넘긴다. `ExerciseFeedbackScreen`이 이를 `completion_rate`/`accuracy_avg`로 PATCH한다.
+- 낙상 확정(`fallPhase === 'fallen'`) 시 `POST /emergency/`로 응급 이벤트를 1회 생성한다. 판정은 온디바이스가 끝냈고 백엔드는 "감지됐다"는 사실과 `detection_source`만 기록한다.
+- **아직 실제 값이 아닌 것**: `PoseFeedback.deviation`(관절별 편차)은 placeholder다. `matcher.ts`의 `matchesPose()`가 boolean만 반환해 각도 차이를 노출하지 않기 때문이며, 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값이다. matcher가 각도 차이를 함께 반환하도록 확장돼야 갈라진다(`ExerciseFeedbackScreen`의 `TODO(vision)` 참고).
+
+**화면 연결**: `ExerciseProgressScreen`(제품 플로우, `workout.poseWorkoutKey`로 워크아웃 결정)과 `PoseSmokeTestScreen`(개발 전용, `stretching` 고정, `EntryScreen`의 `__DEV__` 링크로 진입) 둘 다 `ExercisePipeline`과 `FallPipeline`을 함께 사용한다 — 한 프레임이 운동 매칭과 낙상 감지 양쪽에 동시에 흘러간다.
+
+**주의**: `src/pose/exercise`·`src/pose/fall`을 수정할 때는 `VideoTensor` 쪽 원본과 구조가 어긋나지 않는지 [docs/ASSEMBLY.md](docs/ASSEMBLY.md)의 동기화 체크리스트로 확인한다.

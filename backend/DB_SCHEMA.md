@@ -92,8 +92,13 @@
 | `guide_image_url` | VARCHAR | 운동 안내 이미지 (v1의 `guide_video_url`에서 변경) |
 | `silhouette_url` | VARCHAR | 따라하기용 실루엣 이미지 (신규) |
 | `reference_angles` | JSON | 기준 관절 각도 (신규, 관절 각도 편차 계산의 기준값) |
+| `pose_workout_key` | VARCHAR(20), NULL 허용 | 카메라 판정 시퀀스 선택 태그 — `stretching`/`upper_body`/`knee`/`balance` |
 
 **변경**: v1 `guide_video_url` → v2 `guide_image_url`로 컬럼명·용도 변경. `silhouette_url`, `reference_angles` v2 신규 추가.
+
+**`pose_workout_key` (2026-09-06 추가, 마이그레이션 `0007`)**: 프론트에 카메라 기반 운동 자세 매칭이 붙으면서, "이 운동 행이 어느 포즈 시퀀스로 판정되는지"를 이어줄 연결 고리가 필요해졌다. 판정 시퀀스의 정의(각 단계의 포즈·활성 관절·홀드 시간)와 매칭 로직은 전부 프론트 `src/pose/exercise/constants.ts`의 `WORKOUT_POSE_SEQUENCES`가 소유하고, **백엔드는 어느 시퀀스를 고를지 가리키는 태그만 저장한다** — AGENTS.md 3장의 AI 모델 경계(백엔드는 추론·판정 로직을 구현하지 않는다)를 그대로 지킨다. choices 값은 `WORKOUT_POSE_SEQUENCES`의 키와 정확히 일치해야 하며, 프론트에서 워크아웃이 늘면 여기에도 추가 + 마이그레이션이 필요하다.
+
+NULL을 허용하는 이유는 시드 스크립트·fixture가 없어 `/admin/` 수기 입력이 유일한 등록 경로이기 때문이다(기존 행을 깨지 않는다). 다만 **값이 비면 프론트 운동 선택 목록에서 그 운동이 제외**되므로(`ExerciseSelectScreen`이 걸러내고 `__DEV__`에서 경고), `/admin/`의 Exercise 목록·필터에 이 컬럼을 노출해 누락을 바로 확인할 수 있게 했다.
 
 ### `exercise_mission` — 운동 미션 및 알림 스케줄
 

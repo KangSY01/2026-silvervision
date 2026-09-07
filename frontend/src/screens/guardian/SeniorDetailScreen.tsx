@@ -15,7 +15,8 @@ import {
 } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { G, Line, Rect, Text as SvgText } from 'react-native-svg';
 import {
   apiClient,
   EmergencyEventResponse,
@@ -48,7 +49,9 @@ const CHART_WIDTH = 300;
 const CHART_HEIGHT = 140;
 const CHART_BASELINE = 118;
 const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
-const ACCURACY_TARGET = 80; // 동작 완성도 목표선(%) - 피보호자 데이터가 아닌 고정 기준선
+// 하루 목표 운동 횟수. 백엔드 FRUIT_DAILY_CAP과 같은 값이며, 막대 차트에
+// 점선 기준선으로 그린다(피보호자 데이터가 아닌 고정 기준).
+const DAILY_GOAL = 6;
 
 function xForIndex(index: number, count: number) {
   const paddingX = 22;
@@ -94,7 +97,6 @@ export default function SeniorDetailScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'SeniorDetail'>>();
   const seniorId = Number(route.params.seniorId);
 
-  const [activeTab, setActiveTab] = useState<'activity' | 'accuracy'>('activity');
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [profile, setProfile] = useState<SeniorProfileResponse | null>(null);
   const [sessions, setSessions] = useState<ExerciseSessionResponse[]>([]);
@@ -155,43 +157,10 @@ export default function SeniorDetailScreen() {
     [buckets, sessions],
   );
 
-  // 최근 7일 날짜별 accuracy_avg 평균(값이 있는 세션만; 없으면 null=데이터 없음).
-  const weeklyAccuracy = useMemo(
-    () =>
-      buckets.map((b) => {
-        const values = sessions
-          .filter((s) => {
-            const t = Date.parse(s.created_at);
-            return s.accuracy_avg !== null && t >= b.start && t < b.end;
-          })
-          .map((s) => Number(s.accuracy_avg));
-        if (values.length === 0) return null;
-        return values.reduce((sum, v) => sum + v, 0) / values.length;
-      }),
-    [buckets, sessions],
-  );
-
   const weeklyTotalCount = weeklyCounts.reduce((sum, c) => sum + c, 0);
-  const maxCount = Math.max(1, ...weeklyCounts);
-
-  const accuracyPoints = weeklyAccuracy
-    .map((score, index) =>
-      score === null ? null : { x: xForIndex(index, buckets.length), score },
-    )
-    .filter((p): p is { x: number; score: number } => p !== null);
-  const weeklyAccuracyAvg =
-    accuracyPoints.length > 0
-      ? Math.round(
-          accuracyPoints.reduce((sum, p) => sum + p.score, 0) / accuracyPoints.length,
-        )
-      : null;
-  const accuracyPathD = accuracyPoints
-    .map(
-      (p, index) =>
-        `${index === 0 ? 'M' : 'L'} ${p.x} ${CHART_BASELINE - (p.score / 100) * 100}`,
-    )
-    .join(' ');
-  const targetAccuracyY = CHART_BASELINE - (ACCURACY_TARGET / 100) * 100;
+  // 목표선이 항상 보이도록 목표치를 스케일 하한으로 둔다. 목표를 넘긴 날이
+  // 있으면 그 값에 맞춰 늘어난다.
+  const maxCount = Math.max(DAILY_GOAL, ...weeklyCounts);
 
   const todayStart = useMemo(() => {
     const d = new Date();
@@ -238,15 +207,15 @@ export default function SeniorDetailScreen() {
 
   if (loadState === 'loading') {
     return (
-      <View style={styles.centerState}>
+      <SafeAreaView style={styles.centerState}>
         <Text style={styles.centerStateText}>피보호자 정보를 불러오는 중...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (loadState === 'error' || !profile) {
     return (
-      <View style={styles.notFoundContainer}>
+      <SafeAreaView style={styles.notFoundContainer}>
         <Text style={styles.notFoundText}>피보호자 정보를 불러오지 못했습니다.</Text>
         <Pressable
           onPress={handleBack}
@@ -254,7 +223,7 @@ export default function SeniorDetailScreen() {
         >
           <Text style={styles.notFoundButtonText}>목록으로 돌아가기</Text>
         </Pressable>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -262,7 +231,7 @@ export default function SeniorDetailScreen() {
   const protectionLevel = MOBILITY_LEVEL_TO_ACTIVITY_LEVEL[profile.mobility_level];
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header with Senior Profile Summary & Unlink Action */}
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
@@ -320,203 +289,107 @@ export default function SeniorDetailScreen() {
       >
         {/* Interactive Charts Section */}
         <View style={styles.card}>
-          {/* Segmented Tab Controls */}
-          <View style={styles.tabRow}>
-            <Pressable
-              onPress={() => setActiveTab('activity')}
-              style={[styles.tabButton, activeTab === 'activity' && styles.tabButtonActive]}
-            >
-              <Text
-                style={[styles.tabButtonText, activeTab === 'activity' && styles.tabButtonTextActive]}
-              >
-                주간 운동 횟수
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setActiveTab('accuracy')}
-              style={[styles.tabButton, activeTab === 'accuracy' && styles.tabButtonActive]}
-            >
-              <Text
-                style={[styles.tabButtonText, activeTab === 'accuracy' && styles.tabButtonTextActive]}
-              >
-                관절 동작 완성도 (%)
-              </Text>
-            </Pressable>
-          </View>
-
-          {activeTab === 'activity' ? (
-            <View>
-              <View style={styles.chartHeaderRow}>
-                <Text style={styles.chartHeaderLabel}>최근 7일간 완료한 운동</Text>
-                <View style={styles.chartHeaderRight}>
-                  <TrendingUp size={13} color={colors.primary} />
-                  <Text style={styles.chartHeaderRightText}>주간 누적: {weeklyTotalCount}회</Text>
-                </View>
+          <View>
+            <View style={styles.chartHeaderRow}>
+              <Text style={styles.chartHeaderLabel}>최근 7일간 완료한 운동</Text>
+              <View style={styles.chartHeaderRight}>
+                <TrendingUp size={13} color={colors.primary} />
+                <Text style={styles.chartHeaderRightText}>주간 누적: {weeklyTotalCount}회</Text>
               </View>
-
-              {weeklyTotalCount === 0 ? (
-                <View style={styles.emptyChartBox}>
-                  <Text style={styles.emptyChartText}>
-                    최근 7일간 완료한 운동 기록이 없습니다.
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.chartBox}>
-                  <Svg
-                    width="100%"
-                    height={CHART_HEIGHT}
-                    viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-                  >
-                    {[25, 50, 75].map((offset) => (
-                      <Line
-                        key={offset}
-                        x1={0}
-                        y1={CHART_BASELINE - offset}
-                        x2={CHART_WIDTH}
-                        y2={CHART_BASELINE - offset}
-                        stroke={colors.borderLight}
-                        strokeWidth={1}
-                        strokeDasharray="4,4"
-                      />
-                    ))}
-                    {weeklyCounts.map((count, index) => {
-                      const barWidth = 20;
-                      const centerX = xForIndex(index, weeklyCounts.length);
-                      const barHeight = count === 0 ? 0 : Math.max(12, (count / maxCount) * 90);
-                      const y = CHART_BASELINE - barHeight;
-                      return (
-                        <G key={buckets[index].start}>
-                          {count > 0 ? (
-                            <Rect
-                              x={centerX - barWidth / 2}
-                              y={y}
-                              width={barWidth}
-                              height={barHeight}
-                              rx={4}
-                              fill={count >= 2 ? colors.primary : 'rgba(46, 125, 50, 0.4)'}
-                            />
-                          ) : null}
-                          <SvgText
-                            x={centerX}
-                            y={(count === 0 ? CHART_BASELINE : y) - 6}
-                            fontSize={10}
-                            fontWeight="bold"
-                            fill={count === 0 ? colors.disabledText : colors.primary}
-                            textAnchor="middle"
-                          >
-                            {count}회
-                          </SvgText>
-                          <SvgText
-                            x={centerX}
-                            y={CHART_HEIGHT - 6}
-                            fontSize={11}
-                            fontWeight="bold"
-                            fill={colors.textSecondary}
-                            textAnchor="middle"
-                          >
-                            {buckets[index].label}
-                          </SvgText>
-                        </G>
-                      );
-                    })}
-                  </Svg>
-                </View>
-              )}
             </View>
-          ) : (
-            <View>
-              <View style={styles.chartHeaderRow}>
-                <Text style={styles.chartHeaderLabel}>동작 정확도 트렌드</Text>
-                {weeklyAccuracyAvg !== null ? (
-                  <Text style={styles.chartHeaderRightAmber}>주간 평균 {weeklyAccuracyAvg}%</Text>
-                ) : null}
-              </View>
 
-              {accuracyPoints.length === 0 ? (
-                <View style={styles.emptyChartBox}>
-                  <Text style={styles.emptyChartText}>
-                    최근 7일간 동작 완성도 데이터가 없습니다.
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.chartBox}>
-                  <Svg
-                    width="100%"
-                    height={CHART_HEIGHT}
-                    viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-                  >
+            {weeklyTotalCount === 0 ? (
+              <View style={styles.emptyChartBox}>
+                <Text style={styles.emptyChartText}>
+                  최근 7일간 완료한 운동 기록이 없습니다.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.chartBox}>
+                <Svg
+                  width="100%"
+                  height={CHART_HEIGHT}
+                  viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+                >
+                  {[25, 50, 75].map((offset) => (
                     <Line
+                      key={offset}
                       x1={0}
-                      y1={targetAccuracyY}
+                      y1={CHART_BASELINE - offset}
                       x2={CHART_WIDTH}
-                      y2={targetAccuracyY}
-                      stroke={colors.amberFill}
-                      strokeWidth={1.5}
-                      strokeDasharray="3,3"
+                      y2={CHART_BASELINE - offset}
+                      stroke={colors.borderLight}
+                      strokeWidth={1}
+                      strokeDasharray="4,4"
                     />
-                    <SvgText
-                      x={4}
-                      y={targetAccuracyY - 6}
-                      fontSize={9}
-                      fontWeight="bold"
-                      fill={colors.amberTextDeep}
-                      textAnchor="start"
-                    >
-                      목표 완성도 {ACCURACY_TARGET}%
-                    </SvgText>
-                    {accuracyPoints.length > 1 ? (
-                      <Path
-                        d={accuracyPathD}
-                        fill="none"
-                        stroke={colors.primary}
-                        strokeWidth={3}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    ) : null}
-                    {weeklyAccuracy.map((score, index) => {
-                      const label = buckets[index].label;
-                      const x = xForIndex(index, buckets.length);
-                      return (
-                        <G key={buckets[index].start}>
-                          {score !== null ? (
-                            <>
-                              <Circle
-                                cx={x}
-                                cy={CHART_BASELINE - (score / 100) * 100}
-                                r={4}
-                                fill={colors.primary}
-                              />
-                              <SvgText
-                                x={x}
-                                y={CHART_BASELINE - (score / 100) * 100 - 10}
-                                fontSize={9}
-                                fontWeight="bold"
-                                fill={colors.primary}
-                                textAnchor="middle"
-                              >
-                                {Math.round(score)}%
-                              </SvgText>
-                            </>
-                          ) : null}
-                          <SvgText
-                            x={x}
-                            y={CHART_HEIGHT - 6}
-                            fontSize={11}
-                            fontWeight="bold"
-                            fill={colors.textSecondary}
-                            textAnchor="middle"
-                          >
-                            {label}
-                          </SvgText>
-                        </G>
-                      );
-                    })}
-                  </Svg>
-                </View>
-              )}
-            </View>
-          )}
+                  ))}
+                  {/* 하루 목표선. 막대 높이 계산과 같은 스케일(count/maxCount*90)을
+                      써야 선과 막대가 어긋나지 않는다. */}
+                  <Line
+                    x1={0}
+                    y1={CHART_BASELINE - (DAILY_GOAL / maxCount) * 90}
+                    x2={CHART_WIDTH}
+                    y2={CHART_BASELINE - (DAILY_GOAL / maxCount) * 90}
+                    stroke={colors.primary}
+                    strokeWidth={1.5}
+                    strokeDasharray="6,3"
+                    opacity={0.6}
+                  />
+                  <SvgText
+                    x={CHART_WIDTH - 2}
+                    y={CHART_BASELINE - (DAILY_GOAL / maxCount) * 90 - 4}
+                    fontSize={10}
+                    fontWeight="bold"
+                    fill={colors.primary}
+                    textAnchor="end"
+                  >
+                    하루 목표 {DAILY_GOAL}회
+                  </SvgText>
+
+                  {weeklyCounts.map((count, index) => {
+                    const barWidth = 20;
+                    const centerX = xForIndex(index, weeklyCounts.length);
+                    const barHeight = count === 0 ? 0 : Math.max(12, (count / maxCount) * 90);
+                    const y = CHART_BASELINE - barHeight;
+                    return (
+                      <G key={buckets[index].start}>
+                        {count > 0 ? (
+                          <Rect
+                            x={centerX - barWidth / 2}
+                            y={y}
+                            width={barWidth}
+                            height={barHeight}
+                            rx={4}
+                            fill={count >= 2 ? colors.primary : 'rgba(46, 125, 50, 0.4)'}
+                          />
+                        ) : null}
+                        <SvgText
+                          x={centerX}
+                          y={(count === 0 ? CHART_BASELINE : y) - 6}
+                          fontSize={10}
+                          fontWeight="bold"
+                          fill={count === 0 ? colors.disabledText : colors.primary}
+                          textAnchor="middle"
+                        >
+                          {count}회
+                        </SvgText>
+                        <SvgText
+                          x={centerX}
+                          y={CHART_HEIGHT - 6}
+                          fontSize={11}
+                          fontWeight="bold"
+                          fill={colors.textSecondary}
+                          textAnchor="middle"
+                        >
+                          {buckets[index].label}
+                        </SvgText>
+                      </G>
+                    );
+                  })}
+                </Svg>
+              </View>
+            )}
+          </View>
         </View>
 
         {/* Today's Completed Exercises */}
@@ -610,7 +483,7 @@ export default function SeniorDetailScreen() {
           )}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -775,36 +648,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 1,
   },
-  tabRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.background,
-    borderRadius: radius.md,
-    padding: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  tabButton: {
-    flex: 1,
-    minHeight: 36,
-    borderRadius: radius.md - 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabButtonActive: {
-    backgroundColor: colors.surface,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  tabButtonText: {
-    fontSize: guardianFontSizes.badge,
-    fontWeight: fontWeights.black,
-    color: colors.disabledText,
-  },
-  tabButtonTextActive: {
-    color: colors.primary,
-  },
   chartHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -825,11 +668,6 @@ const styles = StyleSheet.create({
     fontSize: guardianFontSizes.badge,
     fontWeight: fontWeights.black,
     color: colors.primary,
-  },
-  chartHeaderRightAmber: {
-    fontSize: guardianFontSizes.badge,
-    fontWeight: fontWeights.black,
-    color: colors.amberIcon,
   },
   chartBox: {
     backgroundColor: colors.background,

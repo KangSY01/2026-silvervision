@@ -101,6 +101,12 @@ class Exercise(models.Model):
         MEDIUM = 'medium', '보통'
         HARD = 'hard', '어려움'
 
+    class PoseWorkoutKey(models.TextChoices):
+        STRETCHING = 'stretching', '스트레칭'
+        UPPER_BODY = 'upper_body', '상체'
+        KNEE = 'knee', '무릎'
+        BALANCE = 'balance', '균형'
+
     exercise_id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=100)
     category = models.CharField(max_length=100)
@@ -110,6 +116,19 @@ class Exercise(models.Model):
     guide_image_url = models.CharField(max_length=255)
     silhouette_url = models.CharField(max_length=255)
     reference_angles = models.JSONField()
+    # 이 운동이 어떤 카메라 판정 시퀀스를 쓰는지 가리키는 **태그**.
+    # 실제 포즈 시퀀스 정의(각 단계의 포즈·관절·홀드 시간)와 판정 로직은
+    # 프론트 `src/pose/exercise/constants.ts`의 WORKOUT_POSE_SEQUENCES가
+    # 소유하며, 백엔드는 "어느 시퀀스를 고를지"만 저장한다 — AGENTS.md의
+    # AI 모델 경계(백엔드는 추론/판정 로직을 구현하지 않는다)를 지키기 위한
+    # 구분이다. choices 값은 WORKOUT_POSE_SEQUENCES의 키와 정확히 일치해야
+    # 한다(프론트에서 키가 늘면 여기에도 추가 + 마이그레이션 필요).
+    # null 허용: 시드 스크립트가 없어 /admin/ 수기 입력이 유일한 경로라
+    # 기존 행을 깨지 않기 위함이며, null인 운동은 프론트 운동 선택 목록에서
+    # 제외된다(ExerciseSelectScreen).
+    pose_workout_key = models.CharField(
+        max_length=20, choices=PoseWorkoutKey.choices, null=True, blank=True,
+    )
 
     class Meta:
         db_table = 'exercise'

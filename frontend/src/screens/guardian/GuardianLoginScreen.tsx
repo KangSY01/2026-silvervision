@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Info, KeyRound, Shield, User } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   apiClient,
   getApiErrorMessage,
@@ -78,7 +79,7 @@ export default function GuardianLoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Top Header */}
       <View>
         <Pressable
@@ -186,7 +187,7 @@ export default function GuardianLoginScreen() {
           <Text style={styles.linkButtonText}>← 처음으로 (피보호자/보호자 선택)</Text>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line } from 'react-native-svg';
 import {
   apiClient,
@@ -141,15 +142,15 @@ export default function AlertDetailScreen() {
 
   if (loadState === 'loading') {
     return (
-      <View style={styles.notFoundContainer}>
+      <SafeAreaView style={styles.notFoundContainer}>
         <Text style={styles.notFoundText}>알림 정보를 불러오는 중...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (loadState === 'error' || !detail) {
     return (
-      <View style={styles.notFoundContainer}>
+      <SafeAreaView style={styles.notFoundContainer}>
         <Text style={styles.notFoundText}>알림 정보를 불러오지 못했습니다.</Text>
         <Pressable
           onPress={handleBack}
@@ -157,7 +158,7 @@ export default function AlertDetailScreen() {
         >
           <Text style={styles.notFoundButtonText}>목록으로 돌아가기</Text>
         </Pressable>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -178,7 +179,7 @@ export default function AlertDetailScreen() {
   const latestNotification = detail.notifications[detail.notifications.length - 1];
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header with Back Button */}
       <View style={styles.header}>
         <Pressable
@@ -373,7 +374,7 @@ export default function AlertDetailScreen() {
           </View>
         )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

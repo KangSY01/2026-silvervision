@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { PoseWorkoutKey } from '../types';
+
 // Expo는 클라이언트 번들(JS)에 인라인될 환경 변수에 EXPO_PUBLIC_ 접두사를 요구한다
 // (그 외 변수는 Metro가 번들에 넣지 않아 런타임에 process.env에서 undefined가 된다).
 // .env의 EXPO_PUBLIC_API_BASE_URL을 읽고, 없으면 로컬 개발 기본값으로 폴백한다.
@@ -30,7 +32,12 @@ export interface SeniorProfileResponse {
   medication: string;
   mobility_level: 'independent' | 'partial_assist' | 'full_assist';
   barcode_code: string;
+  /** 날짜별 상한을 적용한 **전체 누적** 열매 수. 오늘치가 아니다. */
   fruit_count: number;
+  /** 오늘 완료한 운동 수. 자정이 지나면 0부터 다시 센다. */
+  today_completed: number;
+  /** 하루 목표 운동 수(백엔드 FRUIT_DAILY_CAP). */
+  daily_goal: number;
 }
 
 /** backend/api/serializers.py의 GuardianProfileSerializer 응답 형태 (GET /guardian/{id}/). */
@@ -78,6 +85,10 @@ export interface ExerciseResponse {
   guide_image_url: string;
   silhouette_url: string;
   reference_angles: Record<string, unknown>;
+  // 카메라 판정 시퀀스 선택 태그. src/pose/exercise의 WORKOUT_POSE_SEQUENCES
+  // 키와 같은 집합이며, /admin/에서 값을 안 넣은 운동은 null로 내려온다
+  // (ExerciseSelectScreen이 목록에서 제외).
+  pose_workout_key: PoseWorkoutKey | null;
 }
 
 /**
@@ -113,6 +124,27 @@ export interface ExerciseSessionResponse {
   completion_rate: string | null;
   accuracy_avg: string | null;
   created_at: string;
+}
+
+/**
+ * PATCH /senior/{id}/sessions/{session_id}/ 응답
+ * (backend/api/serializers.py의 ExerciseSessionCompleteSerializer).
+ *
+ * fruit_awarded는 "이번 완료로 열매가 실제로 늘었는지"다. 하루 상한
+ * (FRUIT_DAILY_CAP=6)에 걸렸거나 같은 세션을 다시 PATCH하면 false가 되며,
+ * 화면이 "+1 수확!"을 무조건 띄우지 않도록 하는 데 쓴다. fruit_count는 지급
+ * 여부와 무관하게 갱신된 현재 총량이다.
+ */
+export interface ExerciseSessionCompleteResponse {
+  session_id: number;
+  completion_rate: string | null;
+  accuracy_avg: string | null;
+  fruit_count: number;
+  fruit_awarded: boolean;
+  /** 이번 완료를 포함한 오늘의 운동 수. */
+  today_completed: number;
+  /** 하루 목표 운동 수. */
+  daily_goal: number;
 }
 
 /**
@@ -309,6 +341,14 @@ export async function getSession(): Promise<AuthSession | null> {
   return { accessToken, refreshToken, role, userId: Number(userId) };
 }
 
+/**
+ * 재발급받은 access token만 덮어쓴다. ROTATE_REFRESH_TOKENS를 켜지 않았으므로
+ * refresh token·role·userId는 그대로 두고 access token 하나만 교체하면 된다.
+ */
+async function saveAccessToken(accessToken: string): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_KEYS.accessToken, accessToken);
+}
+
 export async function clearSession(): Promise<void> {
   await AsyncStorage.multiRemove(Object.values(STORAGE_KEYS));
 }
@@ -374,10 +414,59 @@ interface RequestOptions {
    * 저장된 access token이 있으면 Authorization 헤더에 자동 첨부할지 여부.
    * 기본 true. 로그인/회원가입처럼 인증이 필요 없는 요청에는 false로 넘긴다 -
    * 이 값이 false인 요청에서 401이 와도 "세션 만료"가 아니라 자격 증명 자체가
-   * 틀린 것이므로 세션을 지우지 않는다(아래 request() 참고).
+   * 틀린 것이므로 재발급 시도 없이 즉시 실패시키고 세션도 지우지 않는다.
+   * auth:true 요청의 401은 refresh 1회 시도 후 실패 시에만 세션을 삭제한다
+   * (아래 request() 참고).
    */
   auth?: boolean;
   signal?: AbortSignal;
+}
+
+/**
+ * 진행 중인 재발급 Promise. 화면 여러 곳이 동시에 요청을 보내다 한꺼번에 401을
+ * 받으면 재발급도 그만큼 중복 발사되는데, 같은 Promise를 공유해 1회로 묶는다.
+ * (두 번째 이후 호출은 첫 번째 결과를 그대로 기다린다.)
+ */
+let inFlightRefresh: Promise<string | null> | null = null;
+
+/**
+ * refresh token으로 access token을 재발급받아 저장하고 새 access token을 반환한다.
+ * 재발급이 불가능하면(refresh token 없음·만료·위조) null을 반환하며, 세션 삭제는
+ * 호출자인 request()가 판단한다.
+ *
+ * request()를 쓰지 않고 fetch를 직접 호출한다 - request()를 타면 이 요청의 401이
+ * 다시 재발급을 부르는 무한 재귀가 된다.
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  if (inFlightRefresh) return inFlightRefresh;
+
+  inFlightRefresh = (async () => {
+    try {
+      const session = await getSession();
+      if (!session) return null;
+
+      const response = await fetch(`${API_BASE_URL}/auth/token/refresh/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh: session.refreshToken }),
+      });
+      if (!response.ok) return null;
+
+      // ROTATE_REFRESH_TOKENS를 켜지 않았으므로 응답은 { access }뿐이다.
+      const data = (await response.json()) as { access?: string };
+      if (!data.access) return null;
+
+      await saveAccessToken(data.access);
+      return data.access;
+    } catch {
+      // 네트워크 실패도 재발급 실패로 취급한다. 세션을 지울지는 호출자가 정한다.
+      return null;
+    } finally {
+      inFlightRefresh = null;
+    }
+  })();
+
+  return inFlightRefresh;
 }
 
 async function request<T>(
@@ -396,28 +485,42 @@ async function request<T>(
     }
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal,
-    });
-  } catch {
-    throw new ApiError(0, { detail: '서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.' });
-  }
+  // 같은 요청을 재발급 후 한 번 더 보내야 하므로 전송 자체를 내부 함수로 묶는다.
+  const send = async (accessToken?: string): Promise<Response> => {
+    const finalHeaders = accessToken
+      ? { ...headers, Authorization: `Bearer ${accessToken}` }
+      : headers;
+    try {
+      return await fetch(`${API_BASE_URL}${path}`, {
+        method,
+        headers: finalHeaders,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal,
+      });
+    } catch {
+      throw new ApiError(0, {
+        detail: '서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.',
+      });
+    }
+  };
 
-  // 단순 401 처리: 백엔드에 refresh 엔드포인트가 아직 없어(simplejwt의
-  // RefreshToken은 로그인 시 최초 발급에만 쓰이고, 이를 access token으로
-  // 교환하는 라우팅은 backend/api/urls.py에 없다) 재시도할 방법 자체가 없다.
-  // 그래서 refresh-and-retry 대신 즉시 로그아웃 상태(토큰 삭제)로 되돌리는
-  // 단순한 방식을 택했다 - 시연 임박 상황에서 존재하지 않는 엔드포인트를
-  // 가정한 재시도 로직보다 확실하게 동작하는 쪽이 낫다고 판단했다. 실제 화면
-  // 전환(로그인 화면으로 이동)은 이 모듈이 네비게이션을 모르므로 호출부(다음
-  // 배치)에서 ApiError.status === 401을 잡아 처리한다.
+  let response = await send();
+
+  // access token 수명은 짧다(SIMPLE_JWT 미설정 시 기본 5분). 만료된 토큰으로
+  // 401이 오면 refresh token으로 한 번 재발급받아 같은 요청을 재시도한다.
+  // 재발급까지 실패해야 비로소 세션을 삭제한다 - 예전에는 첫 401에서 곧바로
+  // 삭제해 5분마다 강제 로그아웃되는 것처럼 보였다.
+  //
+  // 재시도는 정확히 1회다. 새로 받은 토큰으로도 401이면 만료가 아니라 권한
+  // 문제이므로 더 시도해봐야 같은 결과다.
   if (auth && response.status === 401) {
-    await clearSession();
+    const renewed = await refreshAccessToken();
+    if (renewed) {
+      response = await send(renewed);
+    }
+    if (response.status === 401) {
+      await clearSession();
+    }
   }
 
   if (response.status === 204) {

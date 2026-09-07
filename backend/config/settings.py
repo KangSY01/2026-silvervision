@@ -27,10 +27,24 @@ load_dotenv(BASE_DIR / '.env')
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('SECRET_KEY')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+def _env_bool(name, default='False'):
+    return os.getenv(name, default).strip().lower() in ('1', 'true', 'yes', 'on')
 
-ALLOWED_HOSTS = []
+
+# SECURITY WARNING: don't run with debug turned on in production!
+# 코드 기본값은 False다 - 설정을 깜빡한 배포에서 DEBUG가 켜진 채 오류 페이지에
+# 소스·설정이 노출되는 쪽보다, 안 뜨는 쪽이 낫다. 로컬 개발은 .env에
+# DEBUG=True를 두어 켠다(.env.example 참고).
+DEBUG = _env_bool('DEBUG')
+
+# 쉼표로 구분한 호스트 목록. DEBUG=True면 Django가 localhost류를 자동 허용하므로
+# 비워둬도 되지만, DEBUG=False에서는 비어 있으면 모든 요청이 400으로 막힌다.
+# 실기기 테스트처럼 PC의 LAN IP로 접속할 때도 여기에 추가해야 한다.
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv('ALLOWED_HOSTS', '').split(',')
+    if host.strip()
+]
 
 
 # Application definition

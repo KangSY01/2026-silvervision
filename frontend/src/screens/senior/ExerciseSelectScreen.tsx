@@ -45,12 +45,28 @@ function getCategoryIcon(category: string): string {
   return CATEGORY_ICONS[category] ?? DEFAULT_CATEGORY_ICON;
 }
 
-function mapExerciseResponse(exercise: ExerciseResponse): Workout {
+// pose_workout_key가 비어 있으면 ExerciseProgressScreen이 돌릴 포즈 시퀀스를
+// 고를 수 없어 카메라 판정이 불가능하다. 운동 등록 경로가 /admin/ 수기 입력뿐이라
+// 값이 빠진 행이 생길 수 있어(시드 스크립트 없음), 그런 운동은 목록에서 제외한다
+// - 시니어에게 "눌러도 아무 일도 안 일어나는 카드"를 보이지 않기 위해서다.
+// 다만 데이터가 조용히 사라지면 원인을 찾기 어려우므로 개발 빌드에서는 경고를 남긴다.
+function toWorkout(exercise: ExerciseResponse): Workout | null {
+  if (exercise.pose_workout_key == null) {
+    if (__DEV__) {
+      console.warn(
+        `[ExerciseSelectScreen] exercise_id=${exercise.exercise_id} "${exercise.name}"의 ` +
+          'pose_workout_key가 비어 있어 목록에서 제외했습니다. ' +
+          '/admin/의 Exercise에서 값을 지정하세요.',
+      );
+    }
+    return null;
+  }
   return {
     id: exercise.exercise_id,
     name: exercise.name,
     category: exercise.category,
     difficulty: DIFFICULTY_LABELS[exercise.difficulty],
+    poseWorkoutKey: exercise.pose_workout_key,
   };
 }
 
@@ -65,7 +81,11 @@ export default function ExerciseSelectScreen() {
     setError('');
     try {
       const response = await apiClient.get<ExerciseResponse[]>('/exercises/');
-      setWorkouts(response.map(mapExerciseResponse));
+      setWorkouts(
+        response
+          .map(toWorkout)
+          .filter((workout): workout is Workout => workout !== null),
+      );
     } catch (err) {
       setError(getApiErrorMessage(err, '운동 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.'));
     } finally {

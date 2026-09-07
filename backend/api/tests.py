@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -50,12 +51,13 @@ class ApiTestBase(APITestCase):
         guardian.save()
         return guardian
 
-    def make_exercise(self):
+    def make_exercise(self, pose_workout_key=Exercise.PoseWorkoutKey.STRETCHING):
         return Exercise.objects.create(
             name='스트레칭', category='유연성',
             difficulty=Exercise.Difficulty.EASY,
             guide_image_url='http://x/g.png',
             silhouette_url='http://x/s.png', reference_angles={},
+            pose_workout_key=pose_workout_key,
         )
 
     def make_session(self, senior, exercise):
@@ -267,6 +269,48 @@ class SeniorProfileAccessTests(ApiTestBase):
             format='json',
         )
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ExerciseListTests(ApiTestBase):
+    """
+    GET /exercises/ 응답이 pose_workout_key를 싣는지 확인한다. 프론트
+    ExerciseSelectScreen이 이 값으로 카메라 판정 시퀀스를 고르고, null인
+    운동은 목록에서 제외하므로 응답에 필드가 빠지면 운동 목록이 통째로
+    비어버린다(조용한 실패라 테스트로 잡는다).
+    """
+
+    def setUp(self):
+        self.senior = self.make_senior('senior1', 'BARCODE-1')
+        self.url = '/api/v1/exercises/'
+
+    def test_list_includes_pose_workout_key(self):
+        self.make_exercise(pose_workout_key=Exercise.PoseWorkoutKey.KNEE)
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]['pose_workout_key'], 'knee')
+
+    def test_pose_workout_key_can_be_null(self):
+        """
+        /admin/ 수기 입력이 유일한 경로라 값이 비는 행이 생길 수 있다.
+        서버는 이를 허용하고 null로 내려보내며, 목록에서 거를지는 프론트가 정한다.
+        """
+        self.make_exercise(pose_workout_key=None)
+        self.auth('senior', self.senior.senior_id)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIsNone(res.data[0]['pose_workout_key'])
+
+    def test_invalid_pose_workout_key_rejected_by_model_validation(self):
+        """
+        choices 밖의 값은 full_clean()에서 걸린다. 쓰기 API가 없어(운동은
+        /admin/으로만 등록) 400 응답 대신 모델 검증 계층에서 확인한다.
+        """
+        exercise = self.make_exercise()
+        exercise.pose_workout_key = 'squat'
+        with self.assertRaises(ValidationError):
+            exercise.full_clean()
 
 
 class ExerciseSessionReadTests(ApiTestBase):

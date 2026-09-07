@@ -21,7 +21,9 @@ import {
   spacing,
 } from '../../theme/theme';
 
-const MAX_FRUITS = 6;
+// 하루 목표는 백엔드 FRUIT_DAILY_CAP이 단일 소스다(프로필 응답의 daily_goal).
+// 응답을 받기 전 첫 렌더에서 칸 수가 0이 되지 않도록 기본값만 둔다.
+const DEFAULT_DAILY_GOAL = 6;
 
 // 순위 로드 상태. 시니어 화면이라 로딩/에러/빈 상태 모두 숫자 자리에 짧고 분명한
 // 문구로 대체해 카드 레이아웃이 흔들리지 않게 한다.
@@ -54,6 +56,11 @@ export default function SeniorHomeScreen() {
 
   const [ranking, setRanking] = useState<SeniorRankingResponse | null>(null);
   const [rankingState, setRankingState] = useState<RankingLoadState>('loading');
+  // 오늘 진행도(건강 나무). 조회 전에는 null이라 나무가 빈 상태로 그려진다.
+  const [todayProgress, setTodayProgress] = useState<{
+    completed: number;
+    goal: number;
+  } | null>(null);
 
   // 화면 진입/복귀(useFocusEffect)마다 순위와 fruit_count를 다시 불러온다.
   // 로그인 시점 캐싱(지난 배치 패턴)이 아니라 포커스 시 조회를 택한 이유: 둘 다
@@ -75,6 +82,10 @@ export default function SeniorHomeScreen() {
         apiClient.get<SeniorRankingResponse>(`/senior/${session.userId}/ranking/`),
       ]);
       setRanking(rankingResponse);
+      setTodayProgress({
+        completed: profile.today_completed,
+        goal: profile.daily_goal,
+      });
       // fruit_count 단일 소스는 userProfile. 함수형 업데이트라 loadHomeSummary가
       // userProfile에 의존하지 않고, 값이 실제로 바뀐 경우만 새 객체를 만든다
       // (포커스마다 딱 한 번만 조회되도록).
@@ -96,8 +107,12 @@ export default function SeniorHomeScreen() {
     }, [loadHomeSummary]),
   );
 
-  const fruitsCollected = Math.max(0, Math.min(userProfile.fruitCount, MAX_FRUITS));
-  const fruitSlots = Array.from({ length: MAX_FRUITS }, (_, index) => index < fruitsCollected);
+  // 나무는 "오늘" 얼마나 했는지를 보여준다. userProfile.fruitCount는 날짜별
+  // 상한을 적용한 전체 누적이라 이틀째부터 목표치를 넘겨, 그 값으로 칸을
+  // 채우면 운동을 안 한 날에도 나무가 꽉 차 보였다.
+  const dailyGoal = todayProgress?.goal ?? DEFAULT_DAILY_GOAL;
+  const fruitsCollected = Math.max(0, Math.min(todayProgress?.completed ?? 0, dailyGoal));
+  const fruitSlots = Array.from({ length: dailyGoal }, (_, index) => index < fruitsCollected);
 
   const nationalRank = rankDisplay(rankingState, ranking?.national ?? null);
   const regionalRank = rankDisplay(rankingState, ranking?.regional ?? null);
@@ -250,12 +265,12 @@ export default function SeniorHomeScreen() {
               <View style={styles.fruitCountRow}>
                 <Text style={styles.fruitCountValue}>{fruitsCollected}</Text>
                 <Text style={styles.fruitCountDivider}>/</Text>
-                <Text style={styles.fruitCountLabel}>6 개 열매 획득</Text>
+                <Text style={styles.fruitCountLabel}>{dailyGoal} 개 열매 획득</Text>
               </View>
               <Text style={styles.treeCardMessage}>
-                {fruitsCollected < 6
-                  ? `나무 완성까지 앞으로 열매가 ${6 - fruitsCollected}개 더 필요해요!`
-                  : '축하합니다! 이번 주 건강 열매가 풍성하게 열렸어요! 🎉'}
+                {fruitsCollected < dailyGoal
+                  ? `오늘 나무를 채우려면 앞으로 ${dailyGoal - fruitsCollected}번 더 운동하면 돼요!`
+                  : '축하합니다! 오늘 건강 나무를 가득 채우셨어요! 🎉'}
               </Text>
             </View>
           </View>

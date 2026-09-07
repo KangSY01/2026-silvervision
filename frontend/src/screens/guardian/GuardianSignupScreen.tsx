@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Info, KeyRound, MapPin, Phone, Smile, User } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   apiClient,
   getRegisterErrorMessage,
@@ -101,7 +102,7 @@ export default function GuardianSignupScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Top Header */}
       <View style={styles.header}>
         <Pressable
@@ -243,7 +244,7 @@ export default function GuardianSignupScreen() {
           </LinearGradient>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

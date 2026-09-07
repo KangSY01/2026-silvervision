@@ -1,15 +1,22 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   Bell,
+  CheckCircle2,
   Clock,
   Plus,
   Users,
 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { apiClient, getSession, GuardianSeniorMapResponse } from '../../api/client';
+import {
+  apiClient,
+  EmergencyEventResponse,
+  getSession,
+  GuardianSeniorMapResponse,
+} from '../../api/client';
 import GuardianTabScreenLayout from '../../components/GuardianTabScreenLayout';
 import { useAppState } from '../../context/AppStateContext';
 import {
@@ -20,6 +27,12 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
+import {
+  EMERGENCY_STATUS_LABELS,
+  EMERGENCY_TYPE_LABELS,
+  formatEmergencyTimestamp,
+  isAlertClosed,
+} from './emergency';
 
 type ListLoadState = 'loading' | 'ready' | 'error';
 
@@ -28,6 +41,7 @@ export default function GuardianHomeScreen() {
   const { guardianProfile } = useAppState();
 
   const [mappings, setMappings] = useState<GuardianSeniorMapResponse[]>([]);
+  const [events, setEvents] = useState<EmergencyEventResponse[]>([]);
   const [loadState, setLoadState] = useState<ListLoadState>('loading');
 
   // 화면 진입/복귀마다 매핑 목록을 다시 불러온다(SeniorHomeScreen의 useFocusEffect
@@ -35,7 +49,7 @@ export default function GuardianHomeScreen() {
   // 반영되어야 하는데, flat 스택이라 화면이 언마운트되지 않아 useEffect([])로는
   // 재조회가 안 된다. 최초 로드만 'loading'을 노출하고 이후 포커스 재조회는
   // 기존 목록을 둔 채 조용히 갱신한다.
-  const loadMappings = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
     setLoadState((prev) => (prev === 'ready' ? prev : 'loading'));
     try {
       const session = await getSession();
@@ -43,10 +57,16 @@ export default function GuardianHomeScreen() {
         setLoadState('error');
         return;
       }
-      const response = await apiClient.get<GuardianSeniorMapResponse[]>(
-        `/guardian/${session.userId}/seniors/`,
-      );
-      setMappings(response);
+      // 매핑과 응급 이벤트를 함께 받는다(AlertHistoryScreen과 같은 조합).
+      // /emergency/ 는 보호자에게 연결된 피보호자의 이벤트만 내려준다.
+      const [mapResponse, eventResponse] = await Promise.all([
+        apiClient.get<GuardianSeniorMapResponse[]>(
+          `/guardian/${session.userId}/seniors/`,
+        ),
+        apiClient.get<EmergencyEventResponse[]>('/emergency/'),
+      ]);
+      setMappings(mapResponse);
+      setEvents(eventResponse);
       setLoadState('ready');
     } catch {
       setLoadState('error');
@@ -55,11 +75,34 @@ export default function GuardianHomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadMappings();
-    }, [loadMappings]),
+      loadDashboard();
+    }, [loadDashboard]),
   );
 
   const seniorCount = mappings.length;
+
+  // "확인 필요" 판정: 아직 종결되지 않은(false_alarm/resolved 가 아닌) 이벤트를
+  // 가진 피보호자. AlertHistoryScreen의 '미확인' 필터와 같은 기준이라 두 화면의
+  // 숫자가 어긋나지 않는다.
+  const seniorIdsNeedingCheck = new Set(
+    events.filter((event) => !isAlertClosed(event.status)).map((event) => event.senior),
+  );
+  const attentionSeniors = mappings.filter((m) =>
+    seniorIdsNeedingCheck.has(m.senior.senior_id),
+  );
+  const normalSeniors = mappings.filter(
+    (m) => !seniorIdsNeedingCheck.has(m.senior.senior_id),
+  );
+
+  const seniorNameById = new Map(mappings.map((m) => [m.senior.senior_id, m.senior.name]));
+
+  // 피드는 최근 2건만. created_at은 ISO 문자열이라 사전순 비교가 곧 시간순이다.
+  const recentEvents = [...events]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 2);
+
+  const chipNames = (list: GuardianSeniorMapResponse[]) =>
+    list.length > 0 ? list.map((m) => `${m.senior.name} 어르신`).join(', ') : '없음';
 
   const handleOpenAlerts = () => {
     navigation.navigate('AlertHistory');
@@ -117,17 +160,34 @@ export default function GuardianHomeScreen() {
                 등록된 피보호자 <Text style={styles.summaryCount}>{seniorCount}명</Text>
               </Text>
 
-              {/* "정상 / 확인 필요" 상태 구분은 응급 이벤트·활동 로그를 봐야 알 수
-                  있어(AlertHistoryScreen 연동 시 다음 배치에서 처리) 이번 배치에서는
-                  임의 규칙으로 색을 칠하지 않고 등록된 피보호자 이름만 나열한다 -
-                  허위 안심을 주지 않기 위함. */}
               {seniorCount > 0 ? (
-                <View style={styles.nameChipRow}>
-                  {mappings.map((mapping) => (
-                    <View key={mapping.map_id} style={styles.nameChip}>
-                      <Text style={styles.nameChipText}>{mapping.senior.name} 어르신</Text>
+                <View style={styles.statusRow}>
+                  <View style={[styles.statusChip, styles.statusChipOk]}>
+                    <View style={[styles.statusDot, styles.statusDotOk]} />
+                    <View style={styles.statusChipBody}>
+                      <Text style={styles.statusChipTitle}>
+                        정상 {normalSeniors.length}명
+                      </Text>
+                      <Text style={styles.statusChipName} numberOfLines={2}>
+                        {chipNames(normalSeniors)}
+                      </Text>
                     </View>
-                  ))}
+                  </View>
+
+                  <View style={[styles.statusChip, styles.statusChipWarn]}>
+                    <View style={[styles.statusDot, styles.statusDotWarn]} />
+                    <View style={styles.statusChipBody}>
+                      <Text style={[styles.statusChipTitle, styles.statusChipTitleWarn]}>
+                        확인 필요 {attentionSeniors.length}명
+                      </Text>
+                      <Text
+                        style={[styles.statusChipName, styles.statusChipNameWarn]}
+                        numberOfLines={2}
+                      >
+                        {chipNames(attentionSeniors)}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
               ) : (
                 <Text style={styles.emptyHint}>
@@ -138,9 +198,8 @@ export default function GuardianHomeScreen() {
           )}
         </View>
 
-        {/* 최근 알림 및 활동 피드 카드 - AlertHistoryScreen 연동(다음 배치)에서 실제
-            데이터로 채운다. 지금은 실제 등록 피보호자와 맞지 않는 목업 이름을 띄우면
-            오히려 오해를 부르므로 안내 문구로만 둔다. */}
+        {/* 최근 알림 및 활동 피드 카드 - /emergency/ 응답 중 최근 2건. 종결된
+            이벤트는 초록, 대응 중인 이벤트는 주황으로 구분한다. */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardHeaderLeft}>
@@ -152,9 +211,67 @@ export default function GuardianHomeScreen() {
             </Pressable>
           </View>
 
-          <Text style={styles.feedPlaceholder}>
-            어르신의 최근 활동·안전 알림 요약은 다음 업데이트에서 제공됩니다.
-          </Text>
+          {loadState === 'loading' ? (
+            <Text style={styles.feedPlaceholder}>최근 알림을 불러오는 중...</Text>
+          ) : loadState === 'error' ? (
+            <Text style={styles.feedPlaceholder}>
+              최근 알림을 불러오지 못했습니다.
+            </Text>
+          ) : recentEvents.length === 0 ? (
+            <Text style={styles.feedPlaceholder}>
+              아직 기록된 안전 알림이 없습니다.
+            </Text>
+          ) : (
+            <View style={styles.feedList}>
+              {recentEvents.map((event) => {
+                const closed = isAlertClosed(event.status);
+                return (
+                  <View
+                    key={event.event_id}
+                    style={[
+                      styles.feedItem,
+                      closed ? styles.feedItemOk : styles.feedItemWarn,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.feedIcon,
+                        closed ? styles.feedIconOk : styles.feedIconWarn,
+                      ]}
+                    >
+                      {closed ? (
+                        <CheckCircle2 size={16} color={colors.primary} />
+                      ) : (
+                        <AlertTriangle size={16} color={colors.amberIcon} />
+                      )}
+                    </View>
+
+                    <View style={styles.feedBody}>
+                      <View style={styles.feedTopRow}>
+                        <Text style={styles.feedName}>
+                          {seniorNameById.get(event.senior) ?? '피보호자'} 어르신
+                        </Text>
+                        <Text style={styles.feedTime}>
+                          {formatEmergencyTimestamp(event.created_at)}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.feedTitle,
+                          closed ? styles.feedTitleOk : styles.feedTitleWarn,
+                        ]}
+                      >
+                        {EMERGENCY_TYPE_LABELS[event.event_type]}
+                      </Text>
+                      <Text style={styles.feedDesc}>
+                        {EMERGENCY_STATUS_LABELS[event.status]}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </View>
 
         {/* 빠른 이동 카드 2개 */}
@@ -312,24 +429,6 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.extrabold,
     color: colors.text,
   },
-  nameChipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs + spacing.xs,
-  },
-  nameChip: {
-    backgroundColor: colors.primaryTintBackground,
-    borderWidth: 1,
-    borderColor: colors.primaryTintBorder,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.sm + spacing.xs,
-    paddingVertical: spacing.xs + spacing.xs,
-  },
-  nameChipText: {
-    fontSize: guardianFontSizes.body,
-    fontWeight: fontWeights.black,
-    color: colors.primary,
-  },
   emptyHint: {
     fontSize: guardianFontSizes.badge,
     fontWeight: fontWeights.bold,
@@ -341,6 +440,127 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.semibold,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  statusChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm + spacing.xs,
+    paddingVertical: spacing.sm + spacing.xs,
+  },
+  statusChipOk: {
+    backgroundColor: colors.emeraldBackground,
+    borderColor: colors.emeraldBorderLight,
+  },
+  statusChipWarn: {
+    backgroundColor: colors.amberBackground,
+    borderColor: colors.amberCardBorder,
+  },
+  // 이름을 여러 개 나열하면 칩 폭을 넘기므로 텍스트 영역을 별도로 감싼다
+  // (main은 피보호자가 1명뿐인 목업이라 이 래퍼가 없었다).
+  statusChipBody: {
+    flex: 1,
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  statusDotOk: {
+    backgroundColor: colors.primary,
+  },
+  statusDotWarn: {
+    backgroundColor: colors.amberFill,
+  },
+  statusChipTitle: {
+    fontSize: guardianFontSizes.body,
+    fontWeight: fontWeights.black,
+    color: colors.text,
+  },
+  statusChipTitleWarn: {
+    color: colors.amberTextDeep,
+  },
+  statusChipName: {
+    fontSize: guardianFontSizes.tiny,
+    fontWeight: fontWeights.bold,
+    color: colors.textSecondary,
+  },
+  statusChipNameWarn: {
+    color: colors.amberText,
+  },
+  feedList: {
+    gap: spacing.sm + spacing.xs,
+  },
+  feedItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.sm + spacing.xs,
+  },
+  feedItemWarn: {
+    backgroundColor: colors.amberBackground,
+    borderColor: colors.amberCardBorder,
+  },
+  feedItemOk: {
+    backgroundColor: colors.emeraldBackground,
+    borderColor: colors.emeraldBorderLight,
+  },
+  feedIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.md - 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  feedIconWarn: {
+    backgroundColor: colors.amberIconBackground,
+  },
+  feedIconOk: {
+    backgroundColor: colors.emeraldTextLight,
+  },
+  feedBody: {
+    flex: 1,
+  },
+  feedTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+  },
+  feedName: {
+    fontSize: guardianFontSizes.body,
+    fontWeight: fontWeights.black,
+    color: colors.text,
+  },
+  feedTime: {
+    fontSize: guardianFontSizes.tiny,
+    fontWeight: fontWeights.bold,
+    color: colors.disabledText,
+  },
+  feedTitle: {
+    fontSize: guardianFontSizes.badge,
+    fontWeight: fontWeights.black,
+    marginTop: spacing.xs,
+  },
+  feedTitleWarn: {
+    color: colors.amberText,
+  },
+  feedTitleOk: {
+    color: colors.primary,
+  },
+  feedDesc: {
+    fontSize: guardianFontSizes.tiny,
+    fontWeight: fontWeights.semibold,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
   },
   quickNavRow: {
     flexDirection: 'row',

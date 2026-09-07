@@ -1,0 +1,146 @@
+{
+  "stretching1": {
+    "hipPx": {
+      "x": 644.7,
+      "y": 526.25
+    },
+    "shoulderWidthPx": 176.14042693260407,
+    "imageWidth": 1242,
+    "imageHeight": 697
+  },
+  "stretching2": {
+    "hipPx": {
+      "x": 651.05,
+      "y": 501
+    },
+    "shoulderWidthPx": 153.22956633757076,
+    "imageWidth": 1245,
+    "imageHeight": 697
+  },
+  "stretching3": {
+    "hipPx": {
+      "x": 646.95,
+      "y": 510.09999999999997
+    },
+    "shoulderWidthPx": 167.8135274642661,
+    "imageWidth": 1245,
+    "imageHeight": 696
+  },
+  "upper_body1": {
+    "hipPx": {
+      "x": 534.85,
+      "y": 1190.45
+    },
+    "shoulderWidthPx": 292.7708318805,
+    "imageWidth": 1080,
+    "imageHeight": 1920
+  },
+  "upper_body2": {
+    "hipPx": {
+      "x": 498.45,
+      "y": 1198.65
+    },
+    "shoulderWidthPx": 232.32221159415653,
+    "imageWidth": 1080,
+    "imageHeight": 1920
+  },
+  "upper_body3": {
+    "hipPx": {
+      "x": 530.5,
+      "y": 1171.75
+    },
+    "shoulderWidthPx": 281.5071047060801,
+    "imageWidth": 1080,
+    "imageHeight": 1920
+  },
+  "upper_body4": {
+    "hipPx": {
+      "x": 528.05,
+      "y": 1179.3000000000002
+    },
+    "shoulderWidthPx": 263.1194785643967,
+    "imageWidth": 1080,
+    "imageHeight": 1920
+  },
+  "upper_body5": {
+    "hipPx": {
+      "x": 520.1500000000001,
+      "y": 1182.85
+    },
+    "shoulderWidthPx": 269.8349495524995,
+    "imageWidth": 1080,
+    "imageHeight": 1920
+  },
+  "knee1": {
+    "hipPx": {
+      "x": 288.85,
+      "y": 363.45
+    },
+    "shoulderWidthPx": 135.92119040090842,
+    "imageWidth": 586,
+    "imageHeight": 700
+  },
+  "knee2": {
+    "hipPx": {
+      "x": 304,
+      "y": 340.55
+    },
+    "shoulderWidthPx": 130.32210096526222,
+    "imageWidth": 665,
+    "imageHeight": 700
+  },
+  "knee3": {
+    "hipPx": {
+      "x": 384.35,
+      "y": 338.75
+    },
+    "shoulderWidthPx": 134.84038712492634,
+    "imageWidth": 737,
+    "imageHeight": 702
+  },
+  "balance_pose1": {
+    "hipPx": {
+      "x": 314.3,
+      "y": 392.15
+    },
+    "shoulderWidthPx": 97.81308705894116,
+    "imageWidth": 610,
+    "imageHeight": 692
+  },
+  "balance_pose2": {
+    "hipPx": {
+      "x": 307.45000000000005,
+      "y": 391.6
+    },
+    "shoulderWidthPx": 97.32265923206167,
+    "imageWidth": 600,
+    "imageHeight": 692
+  },
+  "balance_pose3": {
+    "hipPx": {
+      "x": 342.9,
+      "y": 383.20000000000005
+    },
+    "shoulderWidthPx": 92.00782575411723,
+    "imageWidth": 661,
+    "imageHeight": 697
+  },
+  "balance_pose4": {
+    "hipPx": {
+      "x": 245.25,
+      "y": 392.5
+    },
+    "shoulderWidthPx": 92.33617925818677,
+    "imageWidth": 465,
+    "imageHeight": 700
+  },
+  "balance_pose5": {
+    "hipPx": {
+      "x": 336.75,
+      "y": 387
+    },
+    "shoulderWidthPx": 95.50256541056895,
+    "imageWidth": 677,
+    "imageHeight": 705
+  }
+}
