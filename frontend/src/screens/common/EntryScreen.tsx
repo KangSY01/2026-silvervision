@@ -2,6 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Heart, Shield, User } from 'lucide-react-native';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   colors,
   fontSizes,
@@ -23,7 +24,7 @@ export default function EntryScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View />
 
       <View style={styles.brand}>
@@ -84,8 +85,16 @@ export default function EntryScreen() {
             <Text style={styles.arrow}>➔</Text>
           </LinearGradient>
         </Pressable>
+
+        {/* 개발 빌드에서만 노출되는 카메라 파이프라인 단독 확인용 진입점.
+            백엔드 세션과 무관하게 포즈 매칭·낙상 감지만 검증한다. */}
+        {__DEV__ && (
+          <Pressable onPress={() => navigation.navigate('PoseSmokeTest')}>
+            <Text style={styles.debugLink}>[dev] 포즈 감지 스모크 테스트</Text>
+          </Pressable>
+        )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -167,5 +176,11 @@ const styles = StyleSheet.create({
   },
   pressed: {
     transform: [{ scale: 0.98 }],
+  },
+  debugLink: {
+    marginTop: spacing.md,
+    textAlign: 'center',
+    fontSize: fontSizes.caption,
+    color: colors.textSecondary,
   },
 });

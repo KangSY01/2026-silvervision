@@ -2,6 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { ArrowLeft, Info, KeyRound, User } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   apiClient,
   getApiErrorMessage,
@@ -82,7 +83,7 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Top Header */}
       <View>
         <Pressable
@@ -175,7 +176,7 @@ export default function LoginScreen() {
           <Text style={styles.linkButtonText}>처음으로 돌아가기</Text>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

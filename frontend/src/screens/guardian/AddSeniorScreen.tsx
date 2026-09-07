@@ -17,6 +17,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   apiClient,
   ApiError,
@@ -152,7 +153,7 @@ export default function AddSeniorScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Top Header with Back Button */}
       <View style={styles.header}>
         <Pressable
@@ -361,7 +362,7 @@ export default function AddSeniorScreen() {
           </View>
         </View>
       ) : null}
-    </View>
+    </SafeAreaView>
   );
 }
 

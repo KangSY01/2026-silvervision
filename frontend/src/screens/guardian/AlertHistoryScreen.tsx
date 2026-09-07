@@ -10,6 +10,7 @@ import {
 } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   apiClient,
   EmergencyEventResponse,
@@ -92,7 +93,7 @@ export default function AlertHistoryScreen() {
   const seniorLabel = (seniorId: number) => seniorNames[seniorId] ?? `어르신 #${seniorId}`;
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <Pressable
@@ -245,7 +246,7 @@ export default function AlertHistoryScreen() {
           })
         )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
