@@ -2,10 +2,14 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CheckCircle2, Sparkles } from 'lucide-react-native';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
-import { apiClient, getSession } from '../../api/client';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  apiClient,
+  ExerciseSessionCompleteResponse,
+  getSession,
+} from '../../api/client';
 import { RootStackParamList } from '../../navigation/types';
 import {
   colors,
@@ -16,53 +20,64 @@ import {
   spacing,
 } from '../../theme/theme';
 
-const SCORE = 87;
-
-// TODO(vision): 실제 BlazePose 관절 편차 배열로 교체 필요. 지금 값은 화면의 정적
-// 진단 그림(왼쪽 팔꿈치 빨강 = 교정 필요, 나머지 초록)과 같은 의미의 고정
-// placeholder이며 실제 측정값이 아니다 - 아직 붙지 않은 비전 파이프라인의 연결
-// 지점을 열어두기 위한 값이다. deviation은 PoseFeedback.deviation(DecimalField,
-// max_digits=5·decimal_places=2)에 그대로 저장된다.
-const PLACEHOLDER_POSE_FEEDBACK = [
-  { joint_name: 'left_elbow', deviation: 12.5 },
-  { joint_name: 'right_elbow', deviation: 2.0 },
-  { joint_name: 'left_knee', deviation: 1.5 },
-  { joint_name: 'right_knee', deviation: 1.5 },
-];
-
 type Route = NativeStackScreenProps<RootStackParamList, 'ExerciseFeedback'>['route'];
 
 export default function ExerciseFeedbackScreen() {
   const navigation = useNavigation();
   const { params } = useRoute<Route>();
-  const { workout, sessionId, completionRate } = params;
+  const { workout, sessionId, result } = params;
 
-  // 화면 도달 = "동작 완료" 시점. 여기서 세션 완료 PATCH + 관절 피드백 POST를
-  // 한 번 수행한다(X 버튼 이탈은 이 화면에 오지 않으므로 세션이 미완료로 남는
-  // 흐름과 일관된다). sessionId가 null이면(세션 시작 실패) 조용히 건너뛴다.
+  // 카메라 파이프라인이 집계한 실제 단계 진행률. 타이머 경과율이 아니라
+  // ExercisePipeline이 통과 처리한 포즈 단계 수에서 나온다.
+  const completionRate = Math.round(
+    (result.completedSteps / result.totalSteps) * 100,
+  );
+
+  // 화면 도달 = "동작 완료" 시점. 여기서 세션 완료 PATCH를 한 번 수행한다
+  // (X 버튼 이탈은 이 화면에 오지 않으므로 세션이 미완료로 남는 흐름과
+  // 일관된다). sessionId가 null이면(세션 시작 실패) 조용히 건너뛴다.
+  // 열매 지급 결과. 'pending'은 완료 PATCH가 아직 끝나지 않은 상태,
+  // 'failed'는 저장 자체가 실패해 기록되지 않은 상태다.
+  const [reward, setReward] = useState<
+    | { state: 'pending' }
+    | { state: 'failed' }
+    | { state: 'done'; awarded: boolean; total: number; todayCompleted: number; dailyGoal: number }
+  >(sessionId == null ? { state: 'failed' } : { state: 'pending' });
+
   useEffect(() => {
     if (sessionId == null) return;
     let cancelled = false;
     (async () => {
       try {
         const session = await getSession();
-        if (!session || cancelled) return;
-        // completion_rate는 ExerciseProgress 타이머 경과율(실제 사용자 행동값),
-        // accuracy_avg는 아직 비전 파이프라인이 없어 화면에 표시 중인 정적 점수를
-        // 그대로 싣는다.
-        // TODO(vision): accuracy_avg를 실제 관절 정확도 평균값으로 교체 필요.
-        await apiClient.patch(
+        if (!session || cancelled) {
+          if (!cancelled) setReward({ state: 'failed' });
+          return;
+        }
+        // accuracy_avg와 completion_rate는 지금 **같은 값**이다. 둘 다
+        // completedSteps/totalSteps 비율이며, 관절 정확도가 아니라 "단계를
+        // 몇 개 통과했는가"다. matcher.ts의 matchesPose()가 boolean만 반환해
+        // 관절별 각도 편차를 노출하지 않기 때문이고, 화면 라벨도 이에 맞춰
+        // '동작 완료율'로 적어 두었다(관절 편차 표시는 측정값이 없어 제거).
+        // matcher가 각도 차이를 함께 반환하도록 확장되면 그때 두 값이 갈라진다.
+        // 같은 값이라고 해서 저장이 잘못된 게 아니니 착각하지 말 것.
+        const completed = await apiClient.patch<ExerciseSessionCompleteResponse>(
           `/senior/${session.userId}/sessions/${sessionId}/`,
-          { completion_rate: completionRate, accuracy_avg: SCORE },
+          { completion_rate: completionRate, accuracy_avg: result.accuracyScore },
         );
         if (cancelled) return;
-        await apiClient.post(
-          `/senior/${session.userId}/sessions/${sessionId}/feedback/`,
-          PLACEHOLDER_POSE_FEEDBACK,
-        );
+        // 지급 여부는 백엔드가 판단한다(하루 상한·중복 PATCH 처리 포함).
+        // 프론트가 임의로 +1을 표시하지 않는다.
+        setReward({
+          state: 'done',
+          awarded: completed.fruit_awarded,
+          total: completed.fruit_count,
+          todayCompleted: completed.today_completed,
+          dailyGoal: completed.daily_goal,
+        });
       } catch {
-        // 완료 반영 실패는 조용히 무시한다 - 결과 화면 표시는 정적이라 영향이
-        // 없고, 재시도 UI는 이번 배치 범위 밖(연동 배선만).
+        // 저장 실패. 열매 카드가 "지급됐다"고 말하지 않도록 상태만 바꾼다.
+        if (!cancelled) setReward({ state: 'failed' });
       }
     })();
     return () => {
@@ -71,19 +86,37 @@ export default function ExerciseFeedbackScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 측정하지 않는 것(유연성·치매 예방 등)은 말하지 않는다. 아는 것은
+  // "몇 단계를 통과했는가"뿐이므로 그것만 근거로 문구를 고른다.
+  const evaluation =
+    completionRate >= 100
+      ? {
+          title: '끝까지 완주하셨습니다!',
+          description: `${workout.name} 동작 ${result.totalSteps}단계를 모두 따라 하셨어요. 이대로 꾸준히 이어가 보세요.`,
+        }
+      : completionRate >= 50
+        ? {
+            title: '잘하고 계세요!',
+            description: `${result.totalSteps}단계 중 ${result.completedSteps}단계를 마치셨어요. 다음에는 끝까지 도전해 볼까요?`,
+          }
+        : {
+            title: '오늘은 여기까지!',
+            description: '무리하지 않으셔도 괜찮아요. 내일 다시 함께 시작해요.',
+          };
+
   const handleConfirm = () => {
-    // 열매 개수는 백엔드 fruit_count가 단일 소스다. 위 useEffect의 세션 완료
-    // PATCH가 반영되면 SeniorHomeScreen이 포커스 시 최신 fruit_count를 다시 불러온다.
+    // 홈 화면의 건강 나무는 오늘 완료 수(today_completed)를 쓴다. 위 useEffect의
+    // 세션 완료 PATCH가 반영된 뒤 SeniorHomeScreen이 포커스 시 다시 조회한다.
     navigation.navigate('SeniorHome');
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Top Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>운동 분석 결과</Text>
+        <Text style={styles.title}>운동 결과</Text>
         <Text style={styles.subtitle}>
-          인공지능 분석기로 {workout.name} 동작을 분석했습니다.
+          {workout.name} 동작을 끝까지 따라 하셨는지 확인했습니다.
         </Text>
       </View>
 
@@ -92,75 +125,18 @@ export default function ExerciseFeedbackScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Joint Diagram Card */}
-        <View style={styles.diagramCard}>
-          <View style={styles.diagramBadge}>
-            <Text style={styles.diagramBadgeText}>📊 관절 정확도 정밀 평가</Text>
-          </View>
-
-          <View style={styles.diagramSvgWrap}>
-            <Svg width="100%" height="100%" viewBox="0 0 200 220">
-              {/* 신체 실루엣 */}
-              <Path
-                d="M100,25 C110,25 118,33 118,43 C118,53 110,61 100,61 C90,61 82,53 82,43 C82,33 90,25 100,25 Z M100,65 L100,135 M100,75 L45,95 M100,75 L155,70 M100,135 L75,195 M100,135 L125,195"
-                stroke={colors.silhouette}
-                strokeWidth={20}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                fill="none"
-                opacity={0.8}
-              />
-
-              {/* 척추 */}
-              <Line x1={100} y1={58} x2={100} y2={135} stroke={colors.jointLineNeutral} strokeWidth={4} />
-              {/* 정확한 오른팔 */}
-              <Line x1={100} y1={75} x2={50} y2={105} stroke={colors.primary} strokeWidth={4} strokeLinecap="round" />
-              {/* 교정 필요 왼팔 */}
-              <Line x1={100} y1={75} x2={150} y2={90} stroke={colors.danger} strokeWidth={4} strokeLinecap="round" />
-              {/* 다리 */}
-              <Line x1={100} y1={135} x2={75} y2={195} stroke={colors.primary} strokeWidth={4} strokeLinecap="round" />
-              <Line x1={100} y1={135} x2={125} y2={195} stroke={colors.primary} strokeWidth={4} strokeLinecap="round" />
-
-              {/* 정확한 관절 점 (초록) */}
-              <Circle cx={100} cy={43} r={6} fill={colors.primary} />
-              <Circle cx={100} cy={75} r={5} fill={colors.primary} />
-              <Circle cx={50} cy={105} r={6} fill={colors.primary} />
-              <Circle cx={75} cy={195} r={6} fill={colors.primary} />
-              <Circle cx={125} cy={195} r={6} fill={colors.primary} />
-
-              {/* 교정 필요 관절 (정적 표시 — animate-pulse 제외) */}
-              <Circle cx={150} cy={90} r={10} fill={colors.danger} opacity={0.4} />
-              <Circle cx={150} cy={90} r={6} fill={colors.danger} />
-
-              <SvgText x={25} y={125} fontSize={11} fontWeight="bold" fill={colors.primary} textAnchor="middle">
-                ✓ 우측 완벽
-              </SvgText>
-
-              <Line
-                x1={150}
-                y1={90}
-                x2={175}
-                y2={115}
-                stroke={colors.danger}
-                strokeWidth={1.5}
-                strokeDasharray="3,3"
-              />
-              <Circle cx={175} cy={115} r={3} fill={colors.danger} />
-            </Svg>
-
-            {/* 콜아웃 버블 (정적 — animate-bounce 제외) */}
-            <View style={styles.calloutBubble}>
-              <Text style={styles.calloutText}>⚠️ 왼쪽 팔꿈치를 딱 5cm만 더 들어올리세요!</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Action Score Card */}
+        {/* 오늘의 진행도 카드. 한 세션의 completion_rate는 정상 경로에서 항상
+            100이라(끝까지 마쳐야 이 화면에 도달) 보여줄 정보가 못 된다.
+            대신 하루 목표 대비 오늘 몇 번 했는지를 보여준다. */}
         <View style={styles.scoreCard}>
-          <Text style={styles.scoreLabel}>오늘의 최종 점수</Text>
+          <Text style={styles.scoreLabel}>오늘의 운동</Text>
           <View style={styles.scoreRow}>
-            <Text style={styles.scoreValue}>{SCORE}</Text>
-            <Text style={styles.scorePercent}>%</Text>
+            <Text style={styles.scoreValue}>
+              {reward.state === 'done' ? reward.todayCompleted : '-'}
+            </Text>
+            <Text style={styles.scorePercent}>
+              {reward.state === 'done' ? ` / ${reward.dailyGoal}` : ''}
+            </Text>
           </View>
 
           <View style={styles.scoreTrack}>
@@ -168,39 +144,62 @@ export default function ExerciseFeedbackScreen() {
               colors={[colors.scoreGradientStart, colors.scoreGradientMid, colors.scoreGradientEnd]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={[styles.scoreFill, { width: `${SCORE}%` }]}
+              style={[
+                styles.scoreFill,
+                {
+                  width:
+                    reward.state === 'done'
+                      ? `${Math.min(100, Math.round((reward.todayCompleted / reward.dailyGoal) * 100))}%`
+                      : '0%',
+                },
+              ]}
             />
           </View>
 
           <View style={styles.scoreEvalBox}>
             <CheckCircle2 size={20} color={colors.primary} />
             <View style={styles.scoreEvalTextArea}>
-              <Text style={styles.scoreEvalTitle}>아주 훌륭한 건강 유연성입니다!</Text>
-              <Text style={styles.scoreEvalDescription}>
-                조금만 수정하면 100점 만점에 가까워져요. 이대로만 계속하시면 치매 예방 점수가 더욱 상승합니다!
-              </Text>
+              <Text style={styles.scoreEvalTitle}>{evaluation.title}</Text>
+              <Text style={styles.scoreEvalDescription}>{evaluation.description}</Text>
             </View>
           </View>
         </View>
 
-        {/* Dynamic Fruit Reward Card */}
+        {/* 열매 보상 카드 - 지급 여부는 백엔드 응답(fruit_awarded)이 정한다.
+            하루 상한에 걸렸거나 저장이 실패했으면 "+1"을 띄우지 않는다. */}
         <LinearGradient
           colors={[colors.amberBackground, colors.amberGradientEnd]}
           style={styles.rewardCard}
         >
           <View style={styles.rewardIconBox}>
             <Text style={styles.rewardIconText}>🍎</Text>
-            <View style={styles.rewardBadge}>
-              <Text style={styles.rewardBadgeText}>+1</Text>
-            </View>
+            {reward.state === 'done' && reward.awarded ? (
+              <View style={styles.rewardBadge}>
+                <Text style={styles.rewardBadgeText}>+1</Text>
+              </View>
+            ) : null}
           </View>
           <View style={styles.rewardTextArea}>
             <View style={styles.rewardTitleRow}>
               <Sparkles size={18} color={colors.amberFill} fill={colors.amberFill} />
-              <Text style={styles.rewardTitle}>건강 열매 1개 수확 성공!</Text>
+              <Text style={styles.rewardTitle}>
+                {reward.state === 'pending'
+                  ? '운동 기록을 저장하는 중...'
+                  : reward.state === 'failed'
+                    ? '기록을 저장하지 못했습니다'
+                    : reward.awarded
+                      ? '건강 열매 1개 수확 성공!'
+                      : '오늘 받을 열매를 모두 모으셨어요'}
+              </Text>
             </View>
             <Text style={styles.rewardDescription}>
-              운동이 기록에 반영되어 어르신의 건강 나무에 열매가 새로 열렸습니다.
+              {reward.state === 'pending'
+                ? '잠시만 기다려 주세요.'
+                : reward.state === 'failed'
+                  ? '네트워크 상태를 확인해 주세요. 이번 운동은 기록에 반영되지 않았습니다.'
+                  : reward.awarded
+                    ? `운동이 기록에 반영되어 건강 나무에 열매가 새로 열렸습니다. (총 ${reward.total}개)`
+                    : `오늘의 열매를 이미 다 받으셨습니다. 운동 기록은 그대로 남아요. (총 ${reward.total}개)`}
             </Text>
           </View>
         </LinearGradient>
@@ -212,11 +211,15 @@ export default function ExerciseFeedbackScreen() {
           onPress={handleConfirm}
           style={({ pressed }) => [styles.confirmButton, pressed && styles.pressedPrimary]}
         >
-          <Text style={styles.confirmButtonText}>열매 챙겨서 나무 보러가기</Text>
+          <Text style={styles.confirmButtonText}>
+            {reward.state === 'done' && reward.awarded
+              ? '열매 챙겨서 나무 보러가기'
+              : '건강 나무 보러가기'}
+          </Text>
           <Text style={styles.confirmButtonArrow}>➔</Text>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -248,64 +251,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: spacing.lg,
     gap: spacing.md + spacing.xs,
-  },
-  diagramCard: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: colors.treeCardBorder,
-    padding: spacing.md + spacing.xs,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.03,
-    shadowRadius: 16,
-    elevation: 1,
-  },
-  diagramBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.primarySoftBackground,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  diagramBadgeText: {
-    fontSize: 14,
-    fontWeight: fontWeights.black,
-    color: colors.primary,
-  },
-  diagramSvgWrap: {
-    width: '100%',
-    maxWidth: 240,
-    aspectRatio: 1 / 1.1,
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: spacing.xs,
-  },
-  calloutBubble: {
-    position: 'absolute',
-    top: 85,
-    right: -8,
-    maxWidth: 130,
-    backgroundColor: colors.danger,
-    borderWidth: 1,
-    borderColor: colors.dangerBorderStrong,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 2,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  calloutText: {
-    fontSize: 12,
-    fontWeight: fontWeights.black,
-    color: colors.white,
-    lineHeight: 16,
   },
   scoreCard: {
     alignItems: 'center',
