@@ -372,16 +372,15 @@ export default function AbilityHistoryScreen() {
 
 // TODO(vision): 이 화면은 현재 조회 전용이다. rom_score/completion_score는
 // 온디바이스 자세 추정(BlazePose) 결과여야 하는데 비전 파이프라인이 아직
-// 붙지 않았고, 유일한 후보 소스인 ExerciseSession.accuracy_avg 조차
-// ExerciseFeedbackScreen에서 고정 placeholder(SCORE = 87)라 그 평균을
-// completion_score로 써 봐야 매일 같은 상수가 찍힌다 - 지난 배치들의
-// "없는 데이터를 지어내지 않는다" 원칙에 어긋난다. completion_rate(타이머
-// 경과율)는 실제 값이지만 "동작 완성도"와 의미가 달라(운동을 얼마나 오래
-// 했나 ≠ 자세를 얼마나 정확히 완성했나) 이 추세선에 섞으면 오히려 오해를
-// 준다. 따라서 POST /senior/{id}/ability-log/ 호출은 비전 연동 시점으로
+// 붙지 않았다. 유일한 후보 소스인 ExerciseSession.accuracy_avg 는 현재
+// ExerciseProgressScreen이 completedSteps/totalSteps 비율로 채워 보내는 값이라
+// (matcher.ts의 matchesPose()가 boolean만 반환 → 관절별 각도 편차 없음)
+// completion_rate 와 완전히 같은 "단계 통과율"이다. "동작 완성도"(자세를 얼마나
+// 정확히 완성했나)와 의미가 달라 그대로 completion_score로 쓰면 지난 배치들의
+// "없는 데이터를 지어내지 않는다" 원칙에 어긋난다. 따라서 POST /senior/{id}/
+// ability-log/ 호출은 matcher가 각도 편차를 함께 반환하도록 확장되는 시점까지
 // 미룬다. 연동 시 훅 지점: ExerciseFeedbackScreen의 세션 완료 useEffect에서
-// 세션 완료 PATCH 직후, 그 날 완료 세션들의 실제 rom/accuracy 값으로
-// upsert POST를 이어붙인다(fruit_count/ranking 자동 갱신과 같은 패턴).
+// 완료 PATCH 직후, 그 날 완료 세션들의 실측 rom/accuracy 값으로 upsert POST.
 
 const styles = StyleSheet.create({
   container: {

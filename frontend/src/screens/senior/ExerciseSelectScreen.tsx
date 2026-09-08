@@ -1,7 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
 import { Info, Mic, Play, Sparkles } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { apiClient, ExerciseResponse, getApiErrorMessage } from '../../api/client';
 import TabScreenLayout from '../../components/TabScreenLayout';
 import {
@@ -99,8 +99,10 @@ export default function ExerciseSelectScreen() {
   }, []);
 
   const handleOpenVoiceAssistant = () => {
-    // TODO: 음성 인식 기능 설계 확정 후 연결 (AGENTS.md 5장 참고) — VoiceAssistantModal은 아직 마운트하지 않음
-    console.log('[ExerciseSelectScreen] open voice assistant');
+    // 음성 인식(말로 찾기·음성 SOS)은 설계 미확정이라 VoiceAssistantModal을 아직
+    // 마운트하지 않는다(AGENTS.md 5장). 버튼은 유지하되 눌렀을 때 다른 시니어
+    // 화면과 같은 Alert 안내 패턴으로 "준비 중"임을 알린다.
+    Alert.alert('알림', '음성 인식 기능은 준비 중입니다. 조금만 기다려 주세요.');
   };
 
   const handleSelectWorkout = (workout: Workout) => {

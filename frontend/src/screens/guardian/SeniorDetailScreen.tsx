@@ -471,7 +471,9 @@ export default function SeniorDetailScreen() {
                       </View>
                     </View>
                     <View style={styles.logBottomRow}>
-                      <Text style={styles.logBottomText}>원격 AI 감지 모듈</Text>
+                      <Text style={styles.logBottomText}>
+                        {event.detection_source || '감지 출처 미상'}
+                      </Text>
                       <Text style={styles.logBottomText}>
                         {formatEmergencyTimestamp(event.created_at)}
                       </Text>

@@ -32,6 +32,7 @@ import {
   EMERGENCY_TYPE_LABELS,
   formatEmergencyTimestamp,
   isAlertClosed,
+  isNotifiedAlert,
 } from './emergency';
 
 type ListLoadState = 'loading' | 'ready' | 'error';
@@ -96,6 +97,11 @@ export default function GuardianHomeScreen() {
 
   const seniorNameById = new Map(mappings.map((m) => [m.senior.senior_id, m.senior.name]));
 
+  // 벨 아이콘 빨간 점: 보호자에게 전송됐고 아직 미종결인(status === 'notified')
+  // 이벤트가 하나라도 있을 때만. GuardianActivityListScreen의 hasCriticalAlert와
+  // 동일 기준이라 두 화면의 신호가 어긋나지 않는다.
+  const hasCriticalAlert = events.some((event) => isNotifiedAlert(event.status));
+
   // 피드는 최근 2건만. created_at은 ISO 문자열이라 사전순 비교가 곧 시간순이다.
   const recentEvents = [...events]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -134,7 +140,7 @@ export default function GuardianHomeScreen() {
             style={({ pressed }) => [styles.bellButton, pressed && styles.pressedOpacity]}
           >
             <Bell size={20} color={colors.textSecondary} />
-            <View style={styles.bellDot} />
+            {hasCriticalAlert && <View style={styles.bellDot} />}
           </Pressable>
         </View>
 
