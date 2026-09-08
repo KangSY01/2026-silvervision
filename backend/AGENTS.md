@@ -11,6 +11,7 @@
 - `djangorestframework` + `djangorestframework_simplejwt` — JWT 인증 (커스텀 인증/권한 클래스는 5장 참고). `rest_framework_simplejwt.token_blacklist` 앱을 `INSTALLED_APPS`에 추가해 로그아웃 시 refresh token을 실제로 무효화한다(마이그레이션은 패키지 동봉, `migrate`만 필요).
 - `django-cors-headers` — 개발 단계 CORS 전체 허용(`CORS_ALLOW_ALL_ORIGINS = True`)
 - `python-dotenv` — `SECRET_KEY` 등 비밀값을 `.env`에서 로드 (`.env`는 git에 커밋하지 않음, `.env.example` 참고)
+- `solapi` — 솔라피 SMS 공식 SDK. 응급 알림(`EmergencyNotification`) 생성 시 연동 보호자에게 실제 문자를 발송한다(`api/sms.py`). `settings.SOLAPI_API_KEY`/`SOLAPI_API_SECRET`/`SOLAPI_SENDER_NUMBER`를 `.env`에서 읽고, `SOLAPI_API_KEY`가 비어 있으면(테스트/CI) 실제 발송 없이 로그만 남기고 통과한다.
 
 ## 3. AI 모델 경계
 
@@ -21,7 +22,7 @@
 - `ExerciseSession`의 `completion_rate`/`accuracy_avg`: 클라이언트(AI 파트)가 계산해서 보낸 값을 검증 후 저장한다. 백엔드가 이 수치를 직접 계산하는 로직을 작성하지 않는다.
 - `PoseFeedback`의 `joint_name`/`deviation`: 클라이언트가 계산한 관절별 편차값을 그대로 저장한다. 각도 계산 공식이나 기준값 비교 로직을 백엔드에 구현하지 않는다. **현재 프론트 호출자는 없다(휴면)** — 프론트 포즈 매처가 boolean만 반환해 넘길 실측 편차가 없어 `POST .../feedback/` 호출을 뺐다(AI 파트가 편차 계산을 제공하면 재연결). 엔드포인트·모델·시리얼라이저는 그대로 둔다.
 - `Exercise.pose_workout_key`(마이그레이션 `0007`, 2026-09-06): 프론트 카메라 자세 매칭이 "이 운동 = 어느 포즈 시퀀스"를 고르게 하는 **태그**만 저장한다. 시퀀스 정의·판정 로직은 프론트 `src/pose/exercise`가 소유하며 백엔드는 추론하지 않는다(경계 유지). `choices`는 프론트 `WORKOUT_POSE_SEQUENCES` 키와 정확히 일치해야 한다.
-- `EmergencyEvent`의 `event_type`/`detection_source`: 클라이언트(비전 모델/센서)가 감지해서 보낸 이벤트를 기록·전파(알림 발송 등)한다. 낙상/무활동을 판별하는 알고리즘 자체는 백엔드에 없다.
+- `EmergencyEvent`의 `event_type`/`detection_source`: 클라이언트(비전 모델/센서)가 감지해서 보낸 이벤트를 기록·전파한다. 낙상/무활동을 판별하는 알고리즘 자체는 백엔드에 없다. 다만 `notified` 전환 시 보호자 SMS 발송(`api/sms.py`, 솔라피)은 "이미 만들어진 알림 이력을 외부 채널로 전파"하는 것이라 AI 경계 밖 — 백엔드 책임이다.
 
 애매한 경계에 있는 로직(예: "편차가 특정 임계값을 넘으면 이상 행동으로 간주"하는 임계치 로직이 백엔드/AI 중 어느 쪽 책임인지, 또는 낙상 감지 후 `emergency_event` 생성을 백엔드가 트리거해야 하는지 클라이언트가 트리거하는지)가 나오면, **임의로 판단해서 구현하지 말고 먼저 사용자에게 확인한다.**
 
@@ -36,7 +37,7 @@
 
 ### 모델 / 마이그레이션
 
-`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0007`(`0007` = `Exercise.pose_workout_key` 추가, null 허용) MySQL 적용 및 컬럼/FK 검증 완료. 그 외 `token_blacklist` 앱이 자체 테이블 2개(`OutstandingToken`/`BlacklistedToken`)를 추가하나 라이브러리가 관리하며 `api` 앱 마이그레이션에는 영향이 없다(`makemigrations --check`는 여전히 "No changes").
+`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0008`(`0007` = `Exercise.pose_workout_key` 추가, null 허용 / `0008` = `EmergencyNotification.channel` default `'fcm'`→`'sms'`) MySQL 적용 및 컬럼/FK 검증 완료. 그 외 `token_blacklist` 앱이 자체 테이블 2개(`OutstandingToken`/`BlacklistedToken`)를 추가하나 라이브러리가 관리하며 `api` 앱 마이그레이션에는 영향이 없다(`makemigrations --check`는 여전히 "No changes").
 
 ### 인증 / 권한 (구현 완료)
 
@@ -74,7 +75,7 @@
 | | GET·POST | `senior/{senior_id}/ability-log/` — 장기 신체 능력(일별). GET `logged_date` 오름차순 전체, POST는 `(senior, logged_date)` upsert(신규 201 / 갱신 200) | `IsSeniorSelf` |
 | **응급** | GET·POST | `emergency/` — GET은 `IsSeniorOrGuardian` + `_visible_emergency_events`, POST는 `IsSenior`(시니어 본인만 생성) | (method별) |
 | | GET·PATCH | `emergency/{event_id}/` — GET은 `emergency_notification`·`camera_access_grant` nested / PATCH는 status 전이(`notified` 제외) | `IsSeniorOrGuardian` + `_visible_emergency_events` |
-| | POST | `emergency/{event_id}/notify/` — 알림 row 생성 (FCM 실발송은 범위 밖) | `IsSeniorOrGuardian` |
+| | POST | `emergency/{event_id}/notify/` — 알림 row 생성 + 각 보호자에게 솔라피 SMS 발송(`api/sms.py`; 실패/키 미설정 시 이력만 남기고 통과, `phone` 없으면 발송 스킵) | `IsSeniorOrGuardian` |
 | | POST·DELETE | `emergency/{event_id}/camera-grant/` — DELETE는 즉시 만료 처리 | `IsSeniorOrGuardian` |
 | **게임화** | GET | `senior/{senior_id}/ranking/` — `{national, regional}` 최신 스냅샷 (없으면 `null`+200) | `IsSeniorSelf` |
 

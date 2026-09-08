@@ -16,6 +16,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 _마지막 전체 교차검증: 2026-09-06 (비전 갈래 ↔ 백엔드 갈래 병합) — 백엔드 엔드포인트 24개, `api/tests.py` 85건 전체 통과, 마이그레이션 `0001`~`0007`. 프론트 제품 화면 18개(`AbilityHistoryScreen` 포함) 전체 API 연동 + 개발 전용 `PoseSmokeTestScreen` 1개, `npx tsc --noEmit` 통과. 카메라 기반 운동 자세 매칭·낙상 감지가 `frontend/src/pose/`로 이식돼 운동 세션(`completion_rate`)·응급 이벤트(`POST /emergency/`)로 백엔드에 연결됨(frontend/AGENTS.md 9장). 남은 비전 연동 대기: `PoseFeedback.deviation`·`accuracy_avg`(matcher가 boolean만 반환 → `POST .../feedback/`는 프론트 호출자 없이 휴면), `AlertDetailScreen` 상세 타임라인(`TIMELINE`) 목업, `AbilityHistoryScreen` 기록 생성 `POST` 보류. 이후 코드가 바뀌었다면 이 문단도 다시 신뢰할 수 없다._
 
+_2026-09-08 갱신: FCM 제거 → 솔라피(Solapi) SMS 실발송으로 교체. 마이그레이션 `0008`(`EmergencyNotification.channel` default `'fcm'`→`'sms'`) 추가로 현재 `0001`~`0008`. `.../notify/`가 `backend/api/sms.py`로 연동 보호자에게 실제 SMS를 보낸다(`SOLAPI_*` env 미설정 시 발송 스킵, `solapi` 패키지 `requirements.txt`에 추가). `api/tests.py`는 85건 그대로 통과._
+
 이 문서는 두 영역을 아우르는 명령어와 아키텍처 요약만 다룬다. 화면 목록, 테이블 전체 목록 등 세부사항은 중복 기술하지 않으므로 위 문서를 참고할 것.
 
 ## 프로젝트 개요

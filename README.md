@@ -30,7 +30,7 @@
 ### 1.2 필요성과 기대효과
 
 1. 60~80세 노년층이 자택에서 지속적으로 실천 가능한 맞춤형 홈 트레이닝 프로그램 제공
-2. Computer Vision 기반 실시간 이상 행동 감지(낙상·무활동) 및 FCM 응급 알림 시스템 구축
+2. Computer Vision 기반 실시간 이상 행동 감지(낙상·무활동) 및 보호자 SMS 응급 알림 시스템 구축
 3. BlazePose 기반 노년 특화 경량 분류기 개발을 통한 고령 친화적 AI 헬스케어 기술 개발 기여
 
 ## 2. 개발 목표
@@ -50,7 +50,7 @@
 |---|---|---|
 | 노년 특화 자세 인식 기준 | 일반 성인 기준 동작 인식 | BlazePose 기반, 노년 신체 특성(근감소증·관절 가동 범위 제한) 반영한 관절 각도 기준값(`reference_angles`) |
 | 낙상 감지 | 미제공 | 온디바이스 관절 시계열 → 경량 1D-CNN(`fall_cnn_quant.tflite`) 실시간 낙상 감지 + 무활동 감지. 판정 로직이 앱(`frontend/src/pose/fall/`)에 내장돼 직접 동작 |
-| 응급 대응 통합 | 별도 미제공(운동 기능과 분리) | 감지 → 1차 확인 → 보호자 알림(FCM) → 카메라 제한적 접근 → 상황 종료까지 하나의 상태 머신으로 통합 |
+| 응급 대응 통합 | 별도 미제공(운동 기능과 분리) | 감지 → 1차 확인 → 보호자 알림(SMS) → 카메라 제한적 접근 → 상황 종료까지 하나의 상태 머신으로 통합 |
 | 보호자 연동 | 미제공 또는 단순 공유 | 다중 피보호자 등록·관리, 활동·응급 이력 실시간 조회 |
 | 별도 하드웨어 필요 여부 | 앱 단독(웨어러블 연동형도 존재) | 불필요(스마트폰 카메라만으로 자세 추정 + 응급 감지) |
 | 보상/동기부여 체계 | 앱마다 상이 | 운동 완료 시 열매 보상 + 전국/지역 랭킹(게임화) |
@@ -83,7 +83,7 @@
 | | python-dotenv | 1.2.2 | `.env` 시크릿 로드 |
 | AI · 비전 (앱 내장) | MediaPipe PoseLandmarker(BlazePose 계열) + 1D-CNN 낙상 분류기(`.tflite`) | — | **이번 vision 통합으로 `frontend/src/pose/`에 편입됨.** `plugins/native/`의 네이티브 프레임 프로세서가 관절 좌표를 추출하고, `src/pose/exercise/`가 포즈 시퀀스 매칭, `src/pose/fall/`이 `fall_cnn_quant.tflite`로 낙상 분류. `VideoTensor` 프로토타입에서 실기기 검증을 마친 판정 로직을 사람이 직접 포팅한 것(절차: `frontend/docs/ASSEMBLY.md`) |
 | AI 모델 학습 (저장소 밖) | BlazePose 파인튜닝, CNN 학습 (ETRI-Activity3D) | — | 모델 **학습·추론 개발 자체**는 여전히 이 저장소 밖 `VideoTensor` 트랙. 학습 산출물(`.task`/`.tflite`)만 위 통합 코드가 로드한다 |
-| 알림 | Firebase Cloud Messaging (FCM) | — | 백엔드는 `emergency_notification.channel`에 발송 채널·이력만 기록. **실제 FCM 발송 연동은 아직 미구현**(범위 밖) |
+| 알림 | 솔라피(Solapi) SMS | `solapi` 5.0.3 | `notified` 전환 시 연동 보호자 휴대폰으로 실제 SMS 발송(`backend/api/sms.py`). 키(`SOLAPI_*`)는 `.env`에서 읽고, 미설정 시 발송을 건너뛴다(테스트/CI). 발송 실패는 삼키고 `emergency_notification` 이력은 그대로 남긴다 |
 
 ### 3.2 시스템 구성도
 
@@ -93,7 +93,7 @@
 
 - **프론트엔드(Expo/React Native)**가 카메라 프레임을 획득하고, 온디바이스 네이티브 프레임 프로세서(`react-native-vision-camera` + MediaPipe PoseLandmarker, `frontend/plugins/native/`)가 33개 관절 좌표를 추출합니다. 그 좌표를 `frontend/src/pose/`의 판정 로직이 받아 (1) 운동 중에는 기준 포즈 시퀀스(`WORKOUT_POSE_SEQUENCES`)와 매칭해 단계 진행을 집계하고, (2) 상시로는 `fall_cnn_quant.tflite`로 낙상 여부를 분류합니다. (BlazePose 모델·CNN 학습 자체는 별도 트랙.)
 - 운동 결과(`completion_rate`/`accuracy_avg`)와 응급 이벤트(`event_type`/`detection_source`)는 클라이언트가 계산까지 마친 값을 **백엔드(Django REST API)**로 전송하며, 백엔드는 이 값을 검증·저장·조회하는 역할만 담당합니다(AI 모델 경계). 관절별 편차(`pose_feedback`)는 현재 포즈 매처가 통과/실패만 반환해 실측값이 없어 프론트에서 전송하지 않습니다(엔드포인트는 대기 상태로 보존).
-- 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이되며, `notified` 상태가 되면 보호자 앱에 알림 레코드가 남고(FCM 실발송은 범위 밖), 제한 시간 동안 카메라 접근 권한(`camera_access_grant`)이 부여됩니다.
+- 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이되며, `notified` 상태가 되면 보호자 앱에 알림 레코드가 남고 연동 보호자 휴대폰으로 솔라피(Solapi) SMS가 발송되며(`SOLAPI_*` 미설정 시 발송 스킵), 제한 시간 동안 카메라 접근 권한(`camera_access_grant`)이 부여됩니다.
 - 보호자 앱은 매핑된 피보호자의 프로필·운동 이력·응급 이력을 조회 전용으로 볼 수 있고, 시니어 본인만 자신의 데이터를 쓸 수 있습니다(IDOR 방지 권한 설계).
 
 ## 4. 개발 결과
@@ -391,6 +391,11 @@ DB_USER=silver        # Docker(A) 기준. 로컬 MySQL(B)이면 본인 계정으
 DB_PASSWORD=silverpw
 DB_HOST=127.0.0.1
 DB_PORT=3306
+
+# 솔라피(Solapi) SMS — 비워두면 응급 알림 문자를 실제로 보내지 않고 로그만 남김(테스트/CI OK)
+SOLAPI_API_KEY=
+SOLAPI_API_SECRET=
+SOLAPI_SENDER_NUMBER=   # 솔라피에 사전 등록한 발신번호
 ```
 
 > `DEBUG`는 코드 기본값이 `False`입니다. `.env`에 `True`를 넣지 않으면 개발 중에도 오류 페이지가 나오지 않고, `ALLOWED_HOSTS`가 비어 있어 모든 요청이 400으로 막힙니다.
