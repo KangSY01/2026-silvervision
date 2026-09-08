@@ -29,6 +29,7 @@ import {
   ExerciseSessionResponse,
   getSession,
 } from '../../api/client';
+import EmergencyCheckOverlay from '../../components/EmergencyCheckOverlay';
 import PoseGuideSilhouette from '../../components/PoseGuideSilhouette';
 import { RootStackParamList } from '../../navigation/types';
 import {
@@ -210,6 +211,9 @@ export default function ExerciseProgressScreen() {
   const [exerciseStatus, setExerciseStatus] = useState<ExerciseStatus>('idle');
   const [exerciseStepIndex, setExerciseStepIndex] = useState(0);
   const [exerciseHoldElapsedMs, setExerciseHoldElapsedMs] = useState(0);
+  // 낙상 확정 시 POST /emergency/ 로 생성된 이벤트 id. 값이 있으면 1차 확인
+  // 오버레이(EmergencyCheckOverlay)를 띄운다.
+  const [emergencyEventId, setEmergencyEventId] = useState<number | null>(null);
 
   // ── 디버그 로깅 (임시) ────────────────────────────────────────────
   // 단계가 바뀔 때마다 "그 단계가 실제로 참조하는 기준 포즈"를 찍는다.
@@ -371,7 +375,9 @@ export default function ExerciseProgressScreen() {
   // 감지 판정 자체는 온디바이스 FallPipeline이 이미 끝냈고, 여기서는 "감지됐다"는
   // 사실과 감지 출처만 백엔드에 기록한다 - EmergencyEventSerializer 주석이 말하는
   // AI 경계 그대로다. senior는 뷰가 토큰 본인으로 강제 주입하므로 body에 싣지 않고,
-  // status도 서버 기본값('detected')에 맡긴다.
+  // status도 서버 기본값('detected')에 맡긴다. 생성에 성공하면 그 event_id로
+  // 1차 확인 오버레이(EmergencyCheckOverlay)를 띄운다 - 오버레이가 first_check
+  // 전이와 false_alarm/notify 호출을 담당한다(기존 엔드포인트만 사용).
   useEffect(() => {
     if (fallPhase !== 'fallen') {
       fallAlertSentRef.current = false;
@@ -382,10 +388,11 @@ export default function ExerciseProgressScreen() {
 
     (async () => {
       try {
-        await apiClient.post<EmergencyEventResponse>('/emergency/', {
+        const created = await apiClient.post<EmergencyEventResponse>('/emergency/', {
           event_type: 'fall',
           detection_source: `exercise:${workout.poseWorkoutKey}`,
         });
+        setEmergencyEventId(created.event_id);
       } catch {
         // 이벤트 생성 실패가 운동 화면을 막지는 않게 조용히 넘어간다.
         // 이 낙상 구간에 대한 재시도는 하지 않는다 - fallPhase가 'fallen'으로
@@ -568,6 +575,14 @@ export default function ExerciseProgressScreen() {
           </Pressable>
         )}
       </View>
+
+      {/* 낙상 확정 시 1차 확인(괜찮으세요?) 오버레이. 화면 전체를 덮는다. */}
+      {emergencyEventId != null && (
+        <EmergencyCheckOverlay
+          eventId={emergencyEventId}
+          onClose={() => setEmergencyEventId(null)}
+        />
+      )}
     </SafeAreaView>
   );
 }
