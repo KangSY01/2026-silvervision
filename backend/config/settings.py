@@ -160,3 +160,12 @@ REST_FRAMEWORK = {
         'api.authentication.RoleBasedJWTAuthentication',
     ),
 }
+
+
+# Solapi(솔라피) SMS
+# 응급 알림(EmergencyNotification) 생성 시 보호자에게 실제 문자를 발송한다.
+# 값은 .env에서 읽으며 커밋하지 않는다(.env.example에 키 이름만).
+# SOLAPI_API_KEY가 비어 있으면(테스트/CI 등) api/sms.py가 실제 발송을 건너뛴다.
+SOLAPI_API_KEY = os.getenv('SOLAPI_API_KEY', '')
+SOLAPI_API_SECRET = os.getenv('SOLAPI_API_SECRET', '')
+SOLAPI_SENDER_NUMBER = os.getenv('SOLAPI_SENDER_NUMBER', '')

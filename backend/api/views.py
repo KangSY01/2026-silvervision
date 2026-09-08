@@ -1,3 +1,5 @@
+import logging
+
 from django.db import IntegrityError
 from django.http import Http404
 from django.shortcuts import get_object_or_404
@@ -26,6 +28,7 @@ from .models import (
     Senior,
 )
 from .gamification import latest_ranking, recalculate_rankings, recompute_fruit_count
+from .sms import send_emergency_sms
 from .permissions import (
     IsGuardianSelf,
     IsSenior,
@@ -64,6 +67,8 @@ from .serializers import (
     TokenRefreshSerializer,
     is_valid_emergency_transition,
 )
+
+logger = logging.getLogger(__name__)
 
 INVALID_CREDENTIALS_MESSAGE = '아이디 또는 비밀번호가 올바르지 않습니다.'
 
@@ -732,8 +737,14 @@ class EmergencyNotifyView(APIView):
     보호자 전원에게 각각 EmergencyNotification을 생성한다(실제
     응급상황에서는 연결된 보호자 모두에게 알리는 게 기본이어야 하므로).
     guardian을 지정하면 해당 시니어와 매핑된 보호자인지 검증하고,
-    매핑 안 됐으면 400. 실제 FCM 발송/외부 연동은 범위 밖 - row 저장
-    까지만 한다.
+    매핑 안 됐으면 400.
+
+    각 EmergencyNotification row를 만든 직후 api/sms.py의
+    send_emergency_sms로 보호자 휴대폰에 실제 SMS(솔라피)를 발송한다.
+    발송 실패는 삼키고 로그만 남긴다 - 알림 이력(row)은 남아야 하므로
+    SMS 실패가 응답을 실패시키지 않는다. guardian.phone이 비어 있으면
+    발송을 시도하지 않고 건너뛴다(row는 그대로 생성). SOLAPI_API_KEY가
+    비어 있으면(테스트/CI) send_emergency_sms가 실제 호출 없이 통과한다.
 
     성공 시 status를 notified로 전환한다(이미 notified면 멱등하게
     통과). first_check를 거치지 않은 상태(detected)이거나 이미
@@ -781,10 +792,23 @@ class EmergencyNotifyView(APIView):
                 ).values_list('guardian_id', flat=True)
             )
 
-        notifications = [
-            EmergencyNotification.objects.create(event=event, guardian_id=gid)
-            for gid in guardian_ids
-        ]
+        notifications = []
+        for gid in guardian_ids:
+            notification = EmergencyNotification.objects.create(
+                event=event, guardian_id=gid, channel='sms',
+            )
+            notifications.append(notification)
+
+            guardian = notification.guardian
+            if (guardian.phone or '').strip():
+                send_emergency_sms(guardian, event.senior, event)
+            else:
+                logger.warning(
+                    'emergency notify: guardian %s has no phone, SMS skipped '
+                    '(event %s)',
+                    gid, event.event_id,
+                )
+
         output = EmergencyNotificationSerializer(notifications, many=True)
         return Response(output.data, status=status.HTTP_201_CREATED)
 

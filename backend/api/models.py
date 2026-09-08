@@ -262,7 +262,7 @@ class EmergencyNotification(models.Model):
     guardian = models.ForeignKey(
         Guardian, on_delete=models.CASCADE, db_column='guardian_id',
     )
-    channel = models.CharField(max_length=50, default='fcm')
+    channel = models.CharField(max_length=50, default='sms')
     sent_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
