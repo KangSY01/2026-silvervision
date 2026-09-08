@@ -1,5 +1,5 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { ShieldCheck, UserMinus } from 'lucide-react-native';
+import { LogOut, ShieldCheck, UserMinus } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import {
   Alert,
@@ -16,6 +16,7 @@ import {
   getSession,
   GuardianProfileResponse,
   GuardianSeniorMapResponse,
+  logout,
 } from '../../api/client';
 import GuardianTabScreenLayout from '../../components/GuardianTabScreenLayout';
 import { useAppState } from '../../context/AppStateContext';
@@ -47,6 +48,7 @@ export default function GuardianProfileScreen() {
   const [editingField, setEditingField] = useState<EditableField | null>(null);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   // 진입/복귀마다 재조회(다른 가디언 화면과 동일 패턴). 최초만 'loading'을
   // 노출하고 이후 포커스 재조회는 기존 화면을 둔 채 조용히 갱신한다.
@@ -157,6 +159,25 @@ export default function GuardianProfileScreen() {
 
   const handleGoHome = () => {
     navigation.navigate('GuardianHome');
+  };
+
+  const handleLogout = () => {
+    Alert.alert('로그아웃', '로그아웃하시겠습니까?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '로그아웃',
+        style: 'destructive',
+        onPress: async () => {
+          setLoggingOut(true);
+          try {
+            await logout();
+          } finally {
+            setLoggingOut(false);
+            navigation.reset({ index: 0, routes: [{ name: 'Entry' }] });
+          }
+        },
+      },
+    ]);
   };
 
   const renderEditableRow = (field: EditableField, last?: boolean) => {
@@ -329,6 +350,23 @@ export default function GuardianProfileScreen() {
           style={({ pressed }) => [styles.backHomeButton, pressed && styles.pressedOpacity]}
         >
           <Text style={styles.backHomeButtonText}>돌아가기</Text>
+        </Pressable>
+
+        {/* 로그아웃 — 확인 Alert → POST /auth/logout/(refresh token blacklist) →
+            로컬 세션 삭제 → 진입 화면으로 스택 리셋. ProfileScreen(시니어)과 동일. */}
+        <Pressable
+          onPress={handleLogout}
+          disabled={loggingOut}
+          style={({ pressed }) => [
+            styles.logoutButton,
+            pressed && styles.pressedOpacity,
+            loggingOut && styles.logoutButtonDisabled,
+          ]}
+        >
+          <LogOut size={16} color={colors.danger} strokeWidth={2.5} />
+          <Text style={styles.logoutButtonText}>
+            {loggingOut ? '로그아웃 중...' : '로그아웃'}
+          </Text>
         </Pressable>
       </ScrollView>
     </GuardianTabScreenLayout>
@@ -609,6 +647,25 @@ const styles = StyleSheet.create({
     fontSize: guardianFontSizes.small,
     fontWeight: fontWeights.bold,
     color: colors.textMuted,
+  },
+  logoutButton: {
+    minHeight: GUARDIAN_MIN_TOUCH_TARGET,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: radius.md,
+  },
+  logoutButtonDisabled: {
+    opacity: 0.6,
+  },
+  logoutButtonText: {
+    fontSize: guardianFontSizes.label,
+    fontWeight: fontWeights.black,
+    color: colors.danger,
   },
   pressedOpacity: {
     opacity: 0.6,

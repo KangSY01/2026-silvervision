@@ -354,6 +354,27 @@ export async function clearSession(): Promise<void> {
 }
 
 /**
+ * 로그아웃. 저장된 refresh token을 백엔드 `POST /auth/logout/`로 blacklist해
+ * 서버에서 실제로 무효화한 뒤(응급 시 카메라/GPS를 여는 서비스라 탈취된
+ * refresh token이 로그아웃 후에도 access token을 찍어내면 위험 — backend
+ * AGENTS.md 5장) 로컬 세션을 지운다. 엔드포인트는 `AllowAny`이고 무효 토큰도
+ * 205로 멱등 통과하므로 인증 없이(`auth: false`) 호출한다. 서버 요청이
+ * 실패해도(네트워크 등) 로컬 세션 삭제는 그대로 진행한다.
+ */
+export async function logout(): Promise<void> {
+  try {
+    const session = await getSession();
+    if (session) {
+      await request('POST', '/auth/logout/', { refresh: session.refreshToken }, { auth: false });
+    }
+  } catch {
+    // 서버 blacklist 실패는 무시하고 로컬 세션만 확실히 지운다.
+  } finally {
+    await clearSession();
+  }
+}
+
+/**
  * DRF 에러 응답을 그대로 감싼다. payload는 `{ detail: string }`(권한/인증 오류,
  * 커스텀 400 등) 또는 `{ field: string[] }`(ModelSerializer 검증 실패) 형태다 -
  * 백엔드 전체에 공통 에러 스키마가 없어 형태를 더 좁게 강제하지 않는다. status 0은

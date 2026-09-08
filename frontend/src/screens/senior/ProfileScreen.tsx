@@ -1,5 +1,5 @@
-import { useFocusEffect } from '@react-navigation/native';
-import { Check, Edit2, QrCode, ShieldCheck } from 'lucide-react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { Check, Edit2, LogOut, QrCode, ShieldCheck } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import {
   Alert,
@@ -15,6 +15,7 @@ import {
   apiClient,
   getApiErrorMessage,
   getSession,
+  logout,
   SeniorProfileResponse,
 } from '../../api/client';
 import TabScreenLayout from '../../components/TabScreenLayout';
@@ -52,12 +53,14 @@ function formatBarcodeCode(code: string): string {
 }
 
 export default function ProfileScreen() {
+  const navigation = useNavigation();
   const { setUserProfile } = useAppState();
 
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [profile, setProfile] = useState<SeniorProfileResponse | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const [editedName, setEditedName] = useState('');
   const [editedPhone, setEditedPhone] = useState('');
@@ -160,6 +163,27 @@ export default function ProfileScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleLogout = () => {
+    Alert.alert('로그아웃', '로그아웃하시겠습니까?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '로그아웃',
+        style: 'destructive',
+        onPress: async () => {
+          setLoggingOut(true);
+          try {
+            await logout();
+          } finally {
+            setLoggingOut(false);
+            // 진입 화면으로 스택을 완전히 리셋(뒤로가기로 로그인 상태 화면에
+            // 되돌아가지 못하게).
+            navigation.reset({ index: 0, routes: [{ name: 'Entry' }] });
+          }
+        },
+      },
+    ]);
   };
 
   const ready = loadState === 'ready' && profile !== null;
@@ -439,7 +463,7 @@ export default function ProfileScreen() {
                 <Text style={styles.barcodeTitle}>가족 연동용 안심 바코드</Text>
               </View>
               <Text style={styles.barcodeDescription}>
-                보호자(가족/요양사)가 아래 바코드를 스캔하면 어르신의 실시간 운동 기록과 나무 완성도를 확인할 수 있습니다.
+                보호자(가족/요양사)가 아래 코드를 입력하면 어르신의 실시간 운동 기록과 나무 완성도를 확인할 수 있습니다.
               </Text>
 
               <View style={styles.barcodeBox}>
@@ -468,6 +492,24 @@ export default function ProfileScreen() {
             </View>
           </>
         )}
+
+        {/* 로그아웃 — GuardianProfileScreen과 동일 패턴(확인 Alert → POST
+            /auth/logout/ 로 refresh token blacklist → 로컬 세션 삭제 → 진입
+            화면으로 스택 리셋). ready 여부와 무관하게 항상 노출한다. */}
+        <Pressable
+          onPress={handleLogout}
+          disabled={loggingOut}
+          style={({ pressed }) => [
+            styles.logoutButton,
+            pressed && styles.pressedOpacity,
+            loggingOut && styles.primaryDisabled,
+          ]}
+        >
+          <LogOut size={20} color={colors.danger} strokeWidth={2.5} />
+          <Text style={styles.logoutButtonText}>
+            {loggingOut ? '로그아웃 중...' : '로그아웃'}
+          </Text>
+        </Pressable>
       </ScrollView>
     </TabScreenLayout>
   );
@@ -785,5 +827,22 @@ const styles = StyleSheet.create({
   },
   pressedOpacity: {
     opacity: 0.6,
+  },
+  logoutButton: {
+    minHeight: MIN_TOUCH_TARGET,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.dangerBorder,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+  },
+  logoutButtonText: {
+    fontSize: fontSizes.button,
+    fontWeight: fontWeights.black,
+    color: colors.danger,
   },
 });
