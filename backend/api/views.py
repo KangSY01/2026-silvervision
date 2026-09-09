@@ -487,6 +487,18 @@ class ExerciseSessionDetailView(generics.RetrieveUpdateAPIView):
             session._fruit_before = session.senior.fruit_count
             recompute_fruit_count(session.senior)
             recalculate_rankings()
+            # 세션이 완료 처리되면 그 미션도 완료다. mission.status는 화면에
+            # 노출되지 않지만(완료 집계는 completion_rate로 함) 생성 후 계속
+            # 'pending'으로 남아 데이터가 어긋나 있어 여기서 함께 맞춘다.
+            # pending/skipped 어느 쪽이든 completed로 덮는다 - status를
+            # completed/skipped로 바꾸는 경로는 ExerciseMissionStatusUpdateView
+            # 뿐이고 현재 프론트 호출자가 없어 'skipped'가 실제로 세팅되는
+            # 흐름이 없으며, 세션 완주는 그 자체로 미션 완료의 확정 신호라
+            # 이전 status와 무관하게 completed가 맞다. 이미 completed면(같은
+            # 세션 재PATCH) 불필요한 UPDATE를 건너뛰어 멱등하게 만든다.
+            if session.mission.status != ExerciseMission.Status.COMPLETED:
+                session.mission.status = ExerciseMission.Status.COMPLETED
+                session.mission.save(update_fields=['status'])
 
 
 class SessionFeedbackCreateView(generics.CreateAPIView):

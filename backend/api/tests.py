@@ -542,6 +542,26 @@ class GamificationTests(ApiTestBase):
         self.senior.refresh_from_db()
         self.assertEqual(self.senior.fruit_count, 1)
 
+    def test_completing_session_marks_mission_completed(self):
+        session = self._complete_session(self.senior)
+        session.mission.refresh_from_db()
+        self.assertEqual(
+            session.mission.status, ExerciseMission.Status.COMPLETED,
+        )
+        # 같은 세션을 다시 완료 PATCH해도 status는 completed로 유지된다(멱등).
+        url = (
+            f'/api/v1/senior/{self.senior.senior_id}'
+            f'/sessions/{session.session_id}/'
+        )
+        res = self.client.patch(
+            url, {'completion_rate': '95.00'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        session.mission.refresh_from_db()
+        self.assertEqual(
+            session.mission.status, ExerciseMission.Status.COMPLETED,
+        )
+
     def test_setting_only_accuracy_does_not_award_or_rank(self):
         session = self.make_session(self.senior, self.exercise)
         self.auth('senior', self.senior.senior_id)
