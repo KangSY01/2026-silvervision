@@ -268,13 +268,13 @@ erDiagram
 | 기록 | GET·POST | `senior/{senior_id}/ability-log/` | 장기 신체 능력(일별) 조회/upsert. POST는 구현됐으나 프론트 호출자 없음(비전 실측 파생 지표 대기) <sup>[†](#dagger)</sup> | 본인 |
 | 응급 | GET·POST | `emergency/` | 응급 이벤트 목록 조회 / 생성 | GET: 본인·매핑된 보호자 / POST: 본인 |
 | 응급 | GET·PATCH | `emergency/{event_id}/` | 이벤트 상세(알림·카메라권한 nested) / 상태 전이 | 본인·매핑된 보호자 |
-| 응급 | POST | `emergency/{event_id}/notify/` | 보호자 알림 레코드 생성 | 본인·매핑된 보호자 |
+| 응급 | POST | `emergency/{event_id}/notify/` | 보호자 알림 레코드 생성 + SMS 발송. 이미 `notified`면 재발송 없이 기존 이력만 반환(재호출 멱등) | 본인·매핑된 보호자 |
 | 응급 | POST·DELETE | `emergency/{event_id}/camera-grant/` | 카메라 접근 권한 부여/즉시 만료 | 본인·매핑된 보호자 |
 | 게임화 | GET | `senior/{senior_id}/ranking/` | 전국/지역 최신 랭킹 스냅샷 조회 | 본인 |
 
 <a id="dagger"></a>**†  휴면 엔드포인트**: `feedback/`는 예전에 `ExerciseFeedbackScreen`이 placeholder 편차값을 보냈으나, 포즈 매처(`src/pose/exercise/matcher.ts`)가 통과/실패(boolean)만 반환해 실측 관절 편차가 없어 호출을 제거했습니다. 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값(단계 통과율)이고, `ability-log/` POST(관절 가동범위·동작 완성도)도 실측 소스가 없어 프론트가 호출하지 않습니다. matcher가 각도 편차를 함께 반환하도록 확장되면 세 지점 모두 다시 연결됩니다. 엔드포인트·시리얼라이저·테스트는 그대로 남아 있습니다.
 
-**미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 85건 통과).
+**미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 87건 통과).
 
 ### 4.3 디렉토리 구조
 
@@ -425,7 +425,7 @@ python manage.py runserver 0.0.0.0:8000     # API는 /api/v1/, admin은 /admin/
 ```bash
 python manage.py check                    # 시스템 체크
 python manage.py makemigrations --check   # 누락된 마이그레이션 확인 (모델 변경 후 필수)
-python manage.py test api                 # 전체 테스트 (85건)
+python manage.py test api                 # 전체 테스트 (87건)
 ```
 
 ### 5.2 프론트엔드 (`frontend/`)

@@ -37,7 +37,7 @@
 
 ### 모델 / 마이그레이션
 
-`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0008`(`0007` = `Exercise.pose_workout_key` 추가, null 허용 / `0008` = `EmergencyNotification.channel` default `'fcm'`→`'sms'`) MySQL 적용 및 컬럼/FK 검증 완료. 그 외 `token_blacklist` 앱이 자체 테이블 2개(`OutstandingToken`/`BlacklistedToken`)를 추가하나 라이브러리가 관리하며 `api` 앱 마이그레이션에는 영향이 없다(`makemigrations --check`는 여전히 "No changes").
+`DB_SCHEMA.md`의 13개 테이블 모두 `api/models.py`에 구현 완료 (`Senior`, `Guardian`, `GuardianSeniorMap`, `Exercise`, `ExerciseMission`, `ExerciseSession`, `PoseFeedback`, `PhysicalAbilityLog`, `EmergencyEvent`, `EmergencyNotification`, `CameraAccessGrant`, `ActivityLog`, `RankingSnapshot`). 마이그레이션 `0001`~`0009`(`0007` = `Exercise.pose_workout_key` 추가, null 허용 / `0008` = `EmergencyNotification.channel` default `'fcm'`→`'sms'` / `0009` = `EmergencyNotification` unique_together `(event, guardian)` — `/notify/` 중복 발송 방지) MySQL 적용 및 컬럼/FK 검증 완료. 그 외 `token_blacklist` 앱이 자체 테이블 2개(`OutstandingToken`/`BlacklistedToken`)를 추가하나 라이브러리가 관리하며 `api` 앱 마이그레이션에는 영향이 없다(`makemigrations --check`는 여전히 "No changes").
 
 ### 인증 / 권한 (구현 완료)
 
@@ -75,7 +75,7 @@
 | | GET·POST | `senior/{senior_id}/ability-log/` — 장기 신체 능력(일별). GET `logged_date` 오름차순 전체, POST는 `(senior, logged_date)` upsert(신규 201 / 갱신 200) | `IsSeniorSelf` |
 | **응급** | GET·POST | `emergency/` — GET은 `IsSeniorOrGuardian` + `_visible_emergency_events`, POST는 `IsSenior`(시니어 본인만 생성) | (method별) |
 | | GET·PATCH | `emergency/{event_id}/` — GET은 `emergency_notification`·`camera_access_grant` nested / PATCH는 status 전이(`notified` 제외) | `IsSeniorOrGuardian` + `_visible_emergency_events` |
-| | POST | `emergency/{event_id}/notify/` — 알림 row 생성 + 각 보호자에게 솔라피 SMS 발송(`api/sms.py`; 실패/키 미설정 시 이력만 남기고 통과, `phone` 없으면 발송 스킵) | `IsSeniorOrGuardian` |
+| | POST | `emergency/{event_id}/notify/` — 알림 row 생성 + 각 보호자에게 솔라피 SMS 발송(`api/sms.py`; 실패/키 미설정 시 이력만 남기고 통과, `phone` 없으면 발송 스킵). 처음 `notified` 전이 시에만 생성·발송(`201`), 이미 `notified`면 기존 이력만 반환(`200`, 재발송 안 함) — 재호출/동시 요청 멱등 | `IsSeniorOrGuardian` |
 | | POST·DELETE | `emergency/{event_id}/camera-grant/` — DELETE는 즉시 만료 처리 | `IsSeniorOrGuardian` |
 | **게임화** | GET | `senior/{senior_id}/ranking/` — `{national, regional}` 최신 스냅샷 (없으면 `null`+200) | `IsSeniorSelf` |
 
@@ -96,7 +96,7 @@
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) + `GET /exercises/` 응답의 `pose_workout_key`(포함·null 허용·choices 밖 값은 `full_clean()`에서 거부) 테스트 85건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) + `GET /exercises/` 응답의 `pose_workout_key`(포함·null 허용·choices 밖 값은 `full_clean()`에서 거부) + `.../notify/` 멱등성(재호출 시 `EmergencyNotification` row·SMS 미증가) 테스트 87건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 

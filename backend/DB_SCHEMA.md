@@ -170,6 +170,7 @@ NULL을 허용하는 이유는 시드 스크립트·fixture가 없어 `/admin/` 
 | `guardian_id` | BIGINT, FK → `guardian.guardian_id` | |
 | `channel` | VARCHAR | 알림 채널. default `'sms'`(솔라피 SMS 실발송, `api/sms.py`). 마이그레이션 `0008`에서 `'fcm'`→`'sms'` |
 
+- **`unique_together = (event_id, guardian_id)`** (마이그레이션 `0009`, 2026-09-09): 한 이벤트에 대해 보호자당 알림은 1건. `/notify/` 재호출·동시 요청이 중복 row(및 중복 SMS)를 만드는 것을 DB 차원에서 막는다. `EmergencyNotifyView`는 애플리케이션 레벨에서도 "이미 notified면 재발송 안 함" + `get_or_create`로 멱등 처리한다.
 - 발송 지연 시간 등 성능 지표는 이 테이블에 타임스탬프 컬럼(`sent_at` 등)을 추가해 계산 (착수보고서 3.2절 "효율성" 요구사항 대응, 구체 기준은 성능 테스트 후 확정 예정이라 v2 시점엔 미확정)
 
 ### `camera_access_grant` — 응급 시 제한적 카메라 접근 권한
@@ -232,6 +233,7 @@ NULL을 허용하는 이유는 시드 스크립트·fixture가 없어 `/admin/` 
 - `/emergency/`, `/emergency/{event_id}/`, `.../notify/`, `.../camera-grant/` (POST/DELETE) → `emergency_event`, `emergency_notification`, `camera_access_grant`
   - (2026-09-02 추가) 이벤트 `GET` 목록/상세 구현. 목록/상세 모두 `_visible_emergency_events`(시니어 본인 소유 또는 `guardian_senior_map`으로 연결된 보호자에게 보이는 것)로 필터 — 다른 시니어 소속 `event_id` 접근 시 404. 상세 응답은 `emergency_notification`(`notifications`), `camera_access_grant`(`camera_grants`)를 nested 포함(둘 다 독립 조회 엔드포인트 없음). 생성은 시니어 본인만, 목록/상세는 시니어·보호자 모두.
   - (2026-09-08) `.../notify/`는 `emergency_notification` row를 만든 직후 `api/sms.py`의 `send_emergency_sms()`로 각 보호자 휴대폰에 솔라피(Solapi) SMS를 실제 발송한다(`channel` default `'sms'`, 마이그레이션 `0008`). `SOLAPI_API_KEY` 미설정(테스트/CI) 시 실발송 없이 로그만 남기고 통과, 발송 실패(API 에러/타임아웃)는 삼켜 row 생성을 막지 않는다, `guardian.phone`이 비면 그 보호자만 발송 스킵(row는 생성). AI 경계와 무관 — "이미 만들어진 알림 이력의 외부 채널 전파"라 백엔드 책임.
+  - (2026-09-09) `.../notify/` **멱등 처리**: 이미 `notified` 상태인 event에 `/notify/`를 다시 호출하면(네트워크 재시도 등) 알림 row·SMS를 재생성하지 않고 기존 이력을 `200`으로 반환한다(처음 전이 시에만 `201` + row 생성 + SMS). 동시 요청 race는 `emergency_notification` unique_together (마이그레이션 `0009`) + `get_or_create`(created일 때만 SMS)로 막는다.
 - `/exercises/`, `/exercises/{id}/` → `exercise` (2026-07-24: 문서에는 "구현 완료"로 표기돼 있었으나 실제 `views.py`/`urls.py`에는 라우팅·뷰가 없던 상태였고, 이번에 실제로 구현해 문서와 코드를 일치시킴)
 - `GET /senior/{id}/ranking/` → `ranking_snapshot` (2026-09-02 구현). 권한 `IsSeniorSelf`. 응답은 `{"national": <스냅샷>|null, "regional": <스냅샷>|null}` — scope별 최신(`snapshot_date` 기준) 스냅샷을 나란히 담는다. 완료 세션이 없는 신규 시니어는 두 scope 모두 `null` + `200`("순위 없음"은 정상 상태라 404가 아님).
   - **순위 산정 방식** (배치 프로세스 부재에 대한 결정): 정식 스케줄러(Celery/cron) 대신, `POST/PATCH`로 세션이 완료 처리(`exercise_session.completion_rate`가 채워짐)될 때 `api/gamification.py`의 `recalculate_rankings()`가 **그 날짜의 national/regional 스냅샷을 전량 재계산해 upsert**한다. `score` = "그 달 1일부터 오늘까지 완료된 세션 수"(AI 경계와 무관한 단순 row 집계). `rank_position` = 같은 `snapshot_date`·`rank_scope` 내 `score` 내림차순 표준 경쟁 순위(동점 동순위: 1,2,2,4). `regional`은 `senior.address` 전체 문자열이 아니라 거기서 뽑은 **"시/도 + 구/군" 접두어**(`api/gamification.py`의 `region_key()`, 예: `"서울특별시 강남구 테헤란로 123"` → `"서울특별시 강남구"`)가 같은 시니어끼리 묶는다. 순위 풀은 해당 월에 완료 세션이 1건 이상인 시니어. `address`가 자유 입력 필드라 접두어 파싱이 완벽하지 않다 — 표기 흔들림(`서울시`/`서울특별시`), 시·도 생략, 상세주소를 앞에 쓴 경우, 오타·영문 주소는 잘못 묶이거나 단독 그룹이 된다. 정확한 그룹핑이 필요하면 행정구역 코드 컬럼을 추가해야 한다. 순위 대상 시니어 수가 적은 프로젝트 규모라 매 완료마다 전량 재계산해도 부담이 없다고 판단했고, 커지면 `python manage.py recalculate_rankings`(신규 management command)로 배치 전환 가능하다.

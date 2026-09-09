@@ -16,7 +16,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 _마지막 전체 교차검증: 2026-09-06 (비전 갈래 ↔ 백엔드 갈래 병합) — 백엔드 엔드포인트 24개, `api/tests.py` 85건 전체 통과, 마이그레이션 `0001`~`0007`. 프론트 제품 화면 18개(`AbilityHistoryScreen` 포함) 전체 API 연동 + 개발 전용 `PoseSmokeTestScreen` 1개, `npx tsc --noEmit` 통과. 카메라 기반 운동 자세 매칭·낙상 감지가 `frontend/src/pose/`로 이식돼 운동 세션(`completion_rate`)·응급 이벤트(`POST /emergency/`)로 백엔드에 연결됨(frontend/AGENTS.md 9장). 남은 비전 연동 대기: `PoseFeedback.deviation`·`accuracy_avg`(matcher가 boolean만 반환 → `POST .../feedback/`는 프론트 호출자 없이 휴면), `AlertDetailScreen` 상세 타임라인(`TIMELINE`) 목업, `AbilityHistoryScreen` 기록 생성 `POST` 보류. 이후 코드가 바뀌었다면 이 문단도 다시 신뢰할 수 없다._
 
-_2026-09-08 갱신: FCM 제거 → 솔라피(Solapi) SMS 실발송으로 교체. 마이그레이션 `0008`(`EmergencyNotification.channel` default `'fcm'`→`'sms'`) 추가로 현재 `0001`~`0008`. `.../notify/`가 `backend/api/sms.py`로 연동 보호자에게 실제 SMS를 보낸다(`SOLAPI_*` env 미설정 시 발송 스킵, `solapi` 패키지 `requirements.txt`에 추가). `api/tests.py`는 85건 그대로 통과._
+_2026-09-08 갱신: FCM 제거 → 솔라피(Solapi) SMS 실발송으로 교체. 마이그레이션 `0008`(`EmergencyNotification.channel` default `'fcm'`→`'sms'`) 추가. `.../notify/`가 `backend/api/sms.py`로 연동 보호자에게 실제 SMS를 보낸다(`SOLAPI_*` env 미설정 시 발송 스킵, `solapi` 패키지 `requirements.txt`에 추가)._
+
+_2026-09-09 갱신: `.../notify/` 중복 SMS 버그 수정. 마이그레이션 `0009`(`EmergencyNotification` unique_together `(event, guardian)`) 추가로 현재 `0001`~`0009`. `EmergencyNotifyView`는 이미 `notified`인 event 재호출 시 row·SMS를 재생성하지 않고 기존 이력만 200으로 반환한다(처음 전이 시에만 201 + 생성 + 발송), race는 `get_or_create`로 흡수. `api/tests.py`는 87건 통과(멱등성 테스트 2건 추가)._
 
 이 문서는 두 영역을 아우르는 명령어와 아키텍처 요약만 다룬다. 화면 목록, 테이블 전체 목록 등 세부사항은 중복 기술하지 않으므로 위 문서를 참고할 것.
 
@@ -46,7 +48,7 @@ python manage.py runserver        # http://localhost:8000, API는 /api/v1/, admi
 
 python manage.py check                       # 시스템 체크
 python manage.py makemigrations --check       # 누락된 마이그레이션 확인 (모델 변경 후 필수)
-python manage.py test                         # 전체 테스트 — api/tests.py 85건
+python manage.py test                         # 전체 테스트 — api/tests.py 87건
 python manage.py test api.tests.ClassName.test_method   # 단일 테스트
 ```
 
