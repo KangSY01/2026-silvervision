@@ -1,16 +1,18 @@
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { Check, Edit2, LogOut, QrCode, ShieldCheck } from 'lucide-react-native';
-import { useCallback, useState } from 'react';
+import { Check, Edit2, LogOut, ShieldCheck } from 'lucide-react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 import {
   apiClient,
   getApiErrorMessage,
@@ -20,6 +22,11 @@ import {
 } from '../../api/client';
 import TabScreenLayout from '../../components/TabScreenLayout';
 import { useAppState } from '../../context/AppStateContext';
+import {
+  applyReminderSetting,
+  DEFAULT_REMINDER_SETTING,
+  loadReminderSetting,
+} from '../../notifications/exerciseReminder';
 import {
   ACTIVITY_LEVEL_TO_MOBILITY_LEVEL,
   MOBILITY_LEVEL_TO_ACTIVITY_LEVEL,
@@ -38,18 +45,20 @@ type LoadState = 'loading' | 'ready' | 'error';
 
 const ACTIVITY_LEVELS: ActivityLevel[] = ['독립', '부분 보조', '완전 보조'];
 
-// 바코드 막대 너비 패턴 (원본 ai-studio-reference의 값 그대로 사용)
-const BARCODE_BARS = [
-  3, 6, 2, 4, 1, 8, 2, 5, 3, 2, 6, 2, 1, 4, 7, 2, 3, 5, 1, 8, 3, 2, 6, 1, 4, 2, 3, 5, 1, 6, 2, 4, 2, 3,
-];
-
 // barcode_code는 백엔드에서 uuid4().hex.upper()로 생성돼 대시 없는 32자리 대문자
 // hex 문자열이다. 어르신이 보호자에게 불러주거나 눈으로 대조하기 쉽도록 8자리씩
-// 4묶음으로 끊어 표시한다(원본 목업의 '9982-1234-5678-SILVER'와 같은 4묶음 형태).
+// 4묶음으로 끊어 표시한다(요약 카드의 "실버비전 매칭 코드" 값에 쓰인다).
 function formatBarcodeCode(code: string): string {
   const cleaned = code.trim();
   if (!cleaned) return '';
   return cleaned.match(/.{1,8}/g)?.join('-') ?? cleaned;
+}
+
+// 운동 알림 시각을 어르신이 읽기 쉬운 "오전/오후 H시 MM분"으로 표시한다.
+function formatReminderTime(hour: number, minute: number): string {
+  const period = hour < 12 ? '오전' : '오후';
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${period} ${hour12}시 ${minute.toString().padStart(2, '0')}분`;
 }
 
 export default function ProfileScreen() {
@@ -68,6 +77,76 @@ export default function ProfileScreen() {
   const [editedDiseases, setEditedDiseases] = useState('');
   const [editedActivity, setEditedActivity] = useState<ActivityLevel>('독립');
   const [editedMedication, setEditedMedication] = useState('');
+
+  // 운동 알림(기기 로컬 설정 — 백엔드 저장 안 함). 값은 AsyncStorage에서 읽고
+  // 실제 예약은 expo-notifications가 맡는다. 서버 프로필과 무관하므로 포커스마다
+  // 재조회하지 않고 최초 1회만 로드한다.
+  const [reminderEnabled, setReminderEnabled] = useState(DEFAULT_REMINDER_SETTING.enabled);
+  const [reminderHour, setReminderHour] = useState(DEFAULT_REMINDER_SETTING.hour);
+  const [reminderMinute, setReminderMinute] = useState(DEFAULT_REMINDER_SETTING.minute);
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const [reminderPermissionDenied, setReminderPermissionDenied] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    loadReminderSetting().then((setting) => {
+      if (!active) return;
+      setReminderEnabled(setting.enabled);
+      setReminderHour(setting.hour);
+      setReminderMinute(setting.minute);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const reminderPickerValue = useMemo(() => {
+    const date = new Date();
+    date.setHours(reminderHour, reminderMinute, 0, 0);
+    return date;
+  }, [reminderHour, reminderMinute]);
+
+  // 켜기/시간변경 공통 처리: 결과에 따라 토글·안내 문구를 맞춘다.
+  const runApplyReminder = useCallback(
+    async (enabled: boolean, hour: number, minute: number) => {
+      setReminderBusy(true);
+      try {
+        const result = await applyReminderSetting({ enabled, hour, minute });
+        if (result === 'permission-denied') {
+          setReminderEnabled(false);
+          setReminderPermissionDenied(true);
+        } else if (result === 'error') {
+          setReminderEnabled(false);
+          Alert.alert('알림 설정 실패', '잠시 후 다시 시도해 주세요.');
+        } else {
+          setReminderEnabled(enabled);
+          setReminderPermissionDenied(false);
+        }
+      } finally {
+        setReminderBusy(false);
+      }
+    },
+    [],
+  );
+
+  const handleToggleReminder = (nextEnabled: boolean) => {
+    setReminderPermissionDenied(false);
+    runApplyReminder(nextEnabled, reminderHour, reminderMinute);
+  };
+
+  const handleTimePickerChange = (event: DateTimePickerEvent, date?: Date) => {
+    // Android는 다이얼로그라 선택/취소 후 닫는다.
+    setShowTimePicker(false);
+    if (event.type !== 'set' || !date) return;
+    const hour = date.getHours();
+    const minute = date.getMinutes();
+    setReminderHour(hour);
+    setReminderMinute(minute);
+    // 시간 선택기는 알림이 켜져 있을 때만 노출되므로 항상 재예약한다
+    // (기존 예약을 지우고 새 시각으로 다시 건다 — 중복 예약 방지).
+    runApplyReminder(true, hour, minute);
+  };
 
   // 진입/복귀마다 재조회(다른 연동 화면과 동일 패턴). 최초만 'loading'을 노출하고
   // 이후 포커스 재조회는 기존 화면을 둔 채 조용히 갱신한다.
@@ -286,6 +365,54 @@ export default function ProfileScreen() {
               </View>
             </View>
 
+            {/* 운동 알림 — 이 휴대폰에만 저장되는 로컬 설정(백엔드 저장 안 함) */}
+            <View style={styles.reminderCard}>
+              <View style={styles.reminderHeaderRow}>
+                <Text style={styles.reminderTitle}>🔔 운동 알림</Text>
+                <Switch
+                  value={reminderEnabled}
+                  onValueChange={handleToggleReminder}
+                  disabled={reminderBusy}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor={colors.white}
+                />
+              </View>
+              <Text style={styles.reminderDescription}>
+                매일 정한 시각에 "오늘의 운동을 시작해볼까요?" 알림을 이 휴대폰으로 보내드립니다.
+              </Text>
+
+              {reminderPermissionDenied && (
+                <Text style={styles.reminderDeniedText}>
+                  휴대폰 설정에서 알림을 허용해야 운동 알림을 받을 수 있습니다.
+                </Text>
+              )}
+
+              {reminderEnabled && (
+                <Pressable
+                  onPress={() => setShowTimePicker(true)}
+                  disabled={reminderBusy}
+                  style={({ pressed }) => [
+                    styles.reminderTimeButton,
+                    pressed && styles.pressedOpacity,
+                  ]}
+                >
+                  <Text style={styles.reminderTimeLabel}>알림 시각</Text>
+                  <Text style={styles.reminderTimeValue}>
+                    {formatReminderTime(reminderHour, reminderMinute)}
+                  </Text>
+                </Pressable>
+              )}
+
+              {showTimePicker && (
+                <DateTimePicker
+                  value={reminderPickerValue}
+                  mode="time"
+                  is24Hour={false}
+                  onChange={handleTimePickerChange}
+                />
+              )}
+            </View>
+
             {/* Details Listing */}
             <View style={styles.detailsCard}>
               <View style={styles.detailsBadge}>
@@ -453,41 +580,6 @@ export default function ProfileScreen() {
                 ) : (
                   <Text style={styles.fieldValue}>{profile.medication || '없음'}</Text>
                 )}
-              </View>
-            </View>
-
-            {/* Barcode Section */}
-            <View style={styles.barcodeCard}>
-              <View style={styles.barcodeTitleRow}>
-                <QrCode size={20} color={colors.primary} strokeWidth={2.5} />
-                <Text style={styles.barcodeTitle}>가족 연동용 안심 바코드</Text>
-              </View>
-              <Text style={styles.barcodeDescription}>
-                보호자(가족/요양사)가 아래 코드를 입력하면 어르신의 실시간 운동 기록과 나무 완성도를 확인할 수 있습니다.
-              </Text>
-
-              <View style={styles.barcodeBox}>
-                <Svg width="100%" height={48} viewBox="0 0 200 60">
-                  {BARCODE_BARS.map((w, idx) => {
-                    const xOffset = 10 + idx * 5.3;
-                    if (idx % 2 === 0 && xOffset < 190) {
-                      return (
-                        <Rect
-                          key={idx}
-                          x={xOffset}
-                          y={5}
-                          width={Math.min(w, 4)}
-                          height={50}
-                          fill={colors.barcodeBar}
-                        />
-                      );
-                    }
-                    return null;
-                  })}
-                </Svg>
-                <Text style={styles.barcodeCode}>
-                  {profile.barcode_code ? formatBarcodeCode(profile.barcode_code) : '정보 없음'}
-                </Text>
               </View>
             </View>
           </>
@@ -771,56 +863,62 @@ const styles = StyleSheet.create({
   activityButtonTextActive: {
     color: colors.white,
   },
-  barcodeCard: {
-    alignItems: 'center',
+  reminderCard: {
     backgroundColor: colors.surface,
     borderRadius: 28,
     borderWidth: 1,
     borderColor: colors.treeCardBorder,
     padding: spacing.md + spacing.xs,
+    gap: spacing.sm,
     shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.03,
     shadowRadius: 16,
     elevation: 1,
   },
-  barcodeTitleRow: {
+  reminderHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.xs,
+    justifyContent: 'space-between',
+    minHeight: MIN_TOUCH_TARGET,
   },
-  barcodeTitle: {
-    fontSize: 16,
+  reminderTitle: {
+    fontSize: fontSizes.subtitle,
     fontWeight: fontWeights.black,
-    color: colors.primary,
+    color: colors.text,
   },
-  barcodeDescription: {
+  reminderDescription: {
+    fontSize: fontSizes.body,
+    fontWeight: fontWeights.medium,
+    color: colors.textSecondary,
+    lineHeight: 28,
+  },
+  reminderDeniedText: {
     fontSize: fontSizes.body,
     fontWeight: fontWeights.bold,
-    color: colors.disabledText,
-    textAlign: 'center',
-    lineHeight: 26,
-    marginBottom: spacing.md,
-    maxWidth: 280,
+    color: colors.danger,
+    lineHeight: 28,
   },
-  barcodeBox: {
-    width: '100%',
-    maxWidth: 260,
-    backgroundColor: colors.barcodeBackground,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    borderRadius: radius.lg,
-    padding: spacing.md,
+  reminderTimeButton: {
+    minHeight: MIN_TOUCH_TARGET,
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    justifyContent: 'space-between',
+    borderWidth: 2,
+    borderColor: colors.borderLight,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.background,
   },
-  barcodeCode: {
-    fontSize: 13,
+  reminderTimeLabel: {
+    fontSize: 16,
     fontWeight: fontWeights.bold,
     color: colors.disabledText,
-    letterSpacing: 2,
-    textAlign: 'center',
+  },
+  reminderTimeValue: {
+    fontSize: fontSizes.body,
+    fontWeight: fontWeights.black,
+    color: colors.primary,
   },
   pressedPrimary: {
     backgroundColor: '#256428',

@@ -1,7 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
-import { Info, Mic, Play, Sparkles } from 'lucide-react-native';
+import { Info, Play, Sparkles } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { apiClient, ExerciseResponse, getApiErrorMessage } from '../../api/client';
 import TabScreenLayout from '../../components/TabScreenLayout';
 import {
@@ -98,13 +98,6 @@ export default function ExerciseSelectScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleOpenVoiceAssistant = () => {
-    // 음성 인식(말로 찾기·음성 SOS)은 설계 미확정이라 VoiceAssistantModal을 아직
-    // 마운트하지 않는다(AGENTS.md 5장). 버튼은 유지하되 눌렀을 때 다른 시니어
-    // 화면과 같은 Alert 안내 패턴으로 "준비 중"임을 알린다.
-    Alert.alert('알림', '음성 인식 기능은 준비 중입니다. 조금만 기다려 주세요.');
-  };
-
   const handleSelectWorkout = (workout: Workout) => {
     navigation.navigate('ExerciseProgress', { workout });
   };
@@ -113,18 +106,7 @@ export default function ExerciseSelectScreen() {
     <TabScreenLayout activeTab="workout">
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <Text style={styles.title}>추천 치매 예방 운동</Text>
-
-          <Pressable
-            onPress={handleOpenVoiceAssistant}
-            style={({ pressed }) => [styles.micButton, pressed && styles.pressedPrimary]}
-          >
-            <Mic size={24} color={colors.white} strokeWidth={2.5} />
-            <Text style={styles.micButtonLabel}>말로찾기</Text>
-          </Pressable>
-        </View>
-
+        <Text style={styles.title}>추천 치매 예방 운동</Text>
         <Text style={styles.subtitle}>무리가 가지 않는 동작들로 매일 꾸준히 실천해 보세요.</Text>
       </View>
 
@@ -211,38 +193,12 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderLight,
     backgroundColor: colors.background,
   },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
-  },
   title: {
-    flex: 1,
     fontSize: fontSizes.title,
     fontWeight: fontWeights.black,
     color: colors.text,
     letterSpacing: -0.5,
-  },
-  micButton: {
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
-    borderRadius: MIN_TOUCH_TARGET / 2,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  micButtonLabel: {
-    fontSize: 10,
-    fontWeight: fontWeights.black,
-    color: colors.emeraldTextLight,
-    marginTop: 2,
+    marginBottom: spacing.xs,
   },
   subtitle: {
     fontSize: fontSizes.body,
@@ -379,9 +335,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoftBackground,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  pressedPrimary: {
-    backgroundColor: '#256428',
   },
   pressedOpacity: {
     opacity: 0.6,

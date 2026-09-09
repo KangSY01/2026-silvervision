@@ -82,17 +82,8 @@ export const colors = {
   glassesColor: '#37474F',
   smileColor: '#D84315',
   clothesColor: '#66BB6A',
-  barcodeBackground: '#F5F7F3',
-  barcodeBar: '#1B1B1B',
   emeraldTextDeep: '#065F46', // emerald-800 ("세부 인적 사항" 배지 텍스트)
   dangerBorderStrong: '#F87171', // red-400 (피드백 콜아웃 버블 보더)
-
-  // 음성 인식 모달(참고용, 아직 미사용) 전용 컬러
-  modalDragHandle: '#D1D5DB', // gray-300
-  modalCloseBackground: '#F3F4F6', // gray-100
-  listeningRingOuter: 'rgba(46, 125, 50, 0.1)',
-  listeningRingInner: 'rgba(46, 125, 50, 0.05)',
-  suggestionPressedBackground: '#E8EFE5',
 
   // 보호자(guardian) 알림 상태 배지 전용 컬러 ("오탐" 등 파란색 계열 - 시니어 화면엔 없음)
   guardianInfoBackground: '#EFF6FF', // blue-50
