@@ -27,6 +27,7 @@ import {
   EmergencyEventResponse,
   ExerciseMissionResponse,
   ExerciseSessionResponse,
+  getApiErrorMessage,
   getSession,
 } from '../../api/client';
 import EmergencyCheckOverlay from '../../components/EmergencyCheckOverlay';
@@ -40,12 +41,7 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
-import {
-  ExercisePipeline,
-  JOINT_ANGLE_DEFS,
-  WORKOUT_MATCH_TARGETS,
-  type ExerciseStatus,
-} from '@/pose/exercise';
+import { ExercisePipeline, type ExerciseStatus } from '@/pose/exercise';
 import { FallPipeline, type FallPhase } from '@/pose/fall';
 import { mapNormalizedToScreen, type Layout } from '@/pose/screenMapping';
 
@@ -124,6 +120,9 @@ export default function ExerciseProgressScreen() {
   // 중복 생성되지 않게 막는 가드. sessionIdRef는 생성 "결과" 저장용일 뿐 재실행을
   // 막지 못한다(세션 생성이 끝나기 전 effect가 재실행되면 그때 ref는 아직 null).
   const sessionStartRequestedRef = useRef(false);
+  // 미션/세션 POST가 실패하면 완료 PATCH가 조용히 스킵돼 열매·랭킹이 반영되지
+  // 않는다. 카메라 판정은 계속 돌리되(안전 기능), 이 사실을 배너로 알린다.
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // 화면 진입 시 세션을 자동으로 시작한다.
   // ExerciseSessionStartSerializer가 mission을 필수로 받고 exercise를 mission에서
@@ -161,11 +160,18 @@ export default function ExerciseProgressScreen() {
         );
         if (cancelled) return;
         sessionIdRef.current = created.session_id;
-      } catch {
+      } catch (err) {
+        if (cancelled) return;
         // 세션 시작 실패 시에도 카메라 판정 자체는 그대로 동작하게 둔다.
         // sessionId가 null로 남아 결과 화면이 완료 저장을 건너뛸 뿐이며,
-        // 재시도 UI는 이번 배치 범위 밖(연동 배선만).
+        // 재시도 UI는 이번 배치 범위 밖(연동 배선만). 대신 배너로 사실을 알린다.
         sessionIdRef.current = null;
+        setSessionError(
+          getApiErrorMessage(
+            err,
+            '운동 기록 저장에 실패했습니다. 완료해도 기록이 남지 않을 수 있어요.',
+          ),
+        );
       }
     })();
     return () => {
@@ -215,29 +221,6 @@ export default function ExerciseProgressScreen() {
   // 오버레이(EmergencyCheckOverlay)를 띄운다.
   const [emergencyEventId, setEmergencyEventId] = useState<number | null>(null);
 
-  // ── 디버그 로깅 (임시) ────────────────────────────────────────────
-  // 단계가 바뀔 때마다 "그 단계가 실제로 참조하는 기준 포즈"를 찍는다.
-  // WORKOUT_MATCH_TARGETS는 매처가 쓰는 바로 그 배열이라, 여기 찍히는
-  // poseName/각도가 판정에 쓰이는 값 그 자체다(화면 실루엣과 별개 경로가
-  // 아님을 확인하려는 목적). 확인 끝나면 이 블록을 지운다.
-  useEffect(() => {
-    const steps = WORKOUT_MATCH_TARGETS[workout.poseWorkoutKey];
-    const t = steps[exerciseStepIndex];
-    if (t == null) {
-      console.log(`[pose] ${workout.poseWorkoutKey} 완료 (${steps.length}단계)`);
-      return;
-    }
-    const angles = JOINT_ANGLE_DEFS
-      .map((d, i) => [d.name, t.refAngles[i]] as const)
-      .filter(([, v]) => v != null)
-      .map(([n, v]) => `${n}=${(v as number).toFixed(1)}`)
-      .join(' ');
-    console.log(
-      `[pose] ${exerciseStepIndex + 1}/${steps.length} ` +
-        `json=${t.poseName}.json hold=${t.holdMs}ms 기준각도[${angles}]`,
-    );
-  }, [exerciseStepIndex, workout.poseWorkoutKey]);
-  // ─────────────────────────────────────────────────────────────────
   const lastExerciseHoldUpdateRef = useRef(0);
   const lastFallProbUpdateRef = useRef(0);
 
@@ -462,6 +445,15 @@ export default function ExerciseProgressScreen() {
         <Text style={styles.exitButtonText}>✕</Text>
       </Pressable>
 
+      {/* 세션 생성 실패 안내 — 카메라 프리뷰 위쪽에 흐름 배치라 프리뷰를 가리지
+          않는다. 닫기 버튼 없이 계속 떠 있고 화면을 벗어나면 자연히 사라진다. */}
+      {sessionError != null && (
+        <View style={styles.sessionErrorBox}>
+          <AlertTriangle size={20} color={colors.danger} strokeWidth={2.5} />
+          <Text style={styles.sessionErrorText}>{sessionError}</Text>
+        </View>
+      )}
+
       {/* Camera Preview Area */}
       <View
         style={styles.viewport}
@@ -610,6 +602,30 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.subtitle,
     fontWeight: fontWeights.bold,
     color: colors.white,
+  },
+  // ExerciseSelectScreen의 errorBox/errorText와 같은 톤(dangerBackground +
+  // dangerBorder + danger 텍스트). 상단 흐름 배치라 카메라 프리뷰를 가리지 않고,
+  // 우상단 ✕ 버튼과 겹치지 않도록 오른쪽 여백을 넉넉히 둔다.
+  sessionErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.dangerBackground,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: radius.md,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
+    paddingLeft: spacing.md,
+    paddingRight: 52,
+    zIndex: 20,
+  },
+  sessionErrorText: {
+    flex: 1,
+    fontSize: fontSizes.body,
+    fontWeight: fontWeights.bold,
+    color: colors.danger,
   },
   viewport: {
     flex: 1,
