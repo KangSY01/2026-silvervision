@@ -30,7 +30,7 @@
 ### 1.2 필요성과 기대효과
 
 1. 60~80세 노년층이 자택에서 지속적으로 실천 가능한 맞춤형 홈 트레이닝 프로그램 제공
-2. Computer Vision 기반 실시간 이상 행동 감지(낙상·무활동) 및 보호자 SMS 응급 알림 시스템 구축
+2. Computer Vision 기반 실시간 낙상 감지 및 보호자 SMS 응급 알림 시스템 구축
 3. BlazePose 기반 노년 특화 경량 분류기 개발을 통한 고령 친화적 AI 헬스케어 기술 개발 기여
 
 ## 2. 개발 목표
@@ -41,15 +41,15 @@
 
 **주요 기능**
 
-- **시니어(피보호자)**: 회원가입/로그인, 운동 미션 및 알림, 실시간 자세 추정 및 운동 피드백(관절 각도 기반), 낙상·무활동 감지, 응급 확인 절차, 운동 완료 시 보상(나무/열매) 및 랭킹
-- **보호자**: 다중 피보호자 등록 및 관리, 피보호자 활동 기록 조회(주간 활동량, 동작 완성도), 긴급 알림 수신 및 위치 확인, 이상 감지 기록 확인
+- **시니어(피보호자)**: 회원가입/로그인/로그아웃, 매일 반복 운동 알림(로컬), 실시간 자세 추정 및 운동 피드백(관절 각도 기반), 낙상 감지, 1차 확인 절차(알람+팝업), 운동 완료 시 보상(나무/열매) 및 랭킹
+- **보호자**: 다중 피보호자 등록 및 관리, 피보호자 활동 기록 조회(주간 활동량, 동작 완성도), 긴급 상황 SMS 알림 수신, 이상 감지 기록 확인
 
 ### 2.2 기존 서비스 대비 차별성
 
 | 비교 항목 | 일반 mHealth 운동 앱 | 실버비전 |
 |---|---|---|
 | 노년 특화 자세 인식 기준 | 일반 성인 기준 동작 인식 | BlazePose 기반, 노년 신체 특성(근감소증·관절 가동 범위 제한) 반영한 관절 각도 기준값(`reference_angles`) |
-| 낙상 감지 | 미제공 | 온디바이스 관절 시계열 → 경량 1D-CNN(`fall_cnn_quant.tflite`) 실시간 낙상 감지 + 무활동 감지. 판정 로직이 앱(`frontend/src/pose/fall/`)에 내장돼 직접 동작 |
+| 낙상 감지 | 미제공 | 온디바이스 관절 시계열 → 경량 1D-CNN(`fall_cnn_quant.tflite`) 실시간 낙상 감지(재현율 96.8%, 오탐율 1.1%, 10FPS — 4.7절 참고). 판정 로직이 앱(`frontend/src/pose/fall/`)에 내장돼 직접 동작. 무활동 감지는 로그 수집만 있고 자동 판정은 다음 단계(4.6절) |
 | 응급 대응 통합 | 별도 미제공(운동 기능과 분리) | 감지 → 1차 확인 → 보호자 알림(SMS) → 카메라 제한적 접근 → 상황 종료까지 하나의 상태 머신으로 통합 |
 | 보호자 연동 | 미제공 또는 단순 공유 | 다중 피보호자 등록·관리, 활동·응급 이력 실시간 조회 |
 | 별도 하드웨어 필요 여부 | 앱 단독(웨어러블 연동형도 존재) | 불필요(스마트폰 카메라만으로 자세 추정 + 응급 감지) |
@@ -58,7 +58,7 @@
 ### 2.3 사회적 가치
 
 - 치매의 주요 수정 가능 위험 요인인 신체 비활동을 저강도 홈 트레이닝으로 완화해 고령층 인지기능 저하 예방에 기여
-- 낙상·무활동 등 응급 상황을 보호자에게 즉시 연결해 독거·원거리 돌봄 상황의 안전 공백을 줄임
+- 낙상 등 응급 상황을 보호자에게 즉시 연결해 독거·원거리 돌봄 상황의 안전 공백을 줄임
 - 웨어러블 등 추가 장비 없이 스마트폰만으로 동작해 경제적 부담 없이 보급 가능
 - 노년 특화 자세 추정 모델 개발을 통해 고령 친화적 AI 헬스케어 기술 저변 확대에 기여
 
@@ -83,17 +83,18 @@
 | | python-dotenv | 1.2.2 | `.env` 시크릿 로드 |
 | AI · 비전 (앱 내장) | MediaPipe PoseLandmarker(BlazePose 계열) + 1D-CNN 낙상 분류기(`.tflite`) | — | **이번 vision 통합으로 `frontend/src/pose/`에 편입됨.** `plugins/native/`의 네이티브 프레임 프로세서가 관절 좌표를 추출하고, `src/pose/exercise/`가 포즈 시퀀스 매칭, `src/pose/fall/`이 `fall_cnn_quant.tflite`로 낙상 분류. `VideoTensor` 프로토타입에서 실기기 검증을 마친 판정 로직을 사람이 직접 포팅한 것(절차: `frontend/docs/ASSEMBLY.md`) |
 | AI 모델 학습 (저장소 밖) | BlazePose 파인튜닝, CNN 학습 (ETRI-Activity3D) | — | 모델 **학습·추론 개발 자체**는 여전히 이 저장소 밖 `VideoTensor` 트랙. 학습 산출물(`.task`/`.tflite`)만 위 통합 코드가 로드한다 |
-| 알림 | 솔라피(Solapi) SMS | `solapi` 5.0.3 | `notified` 전환 시 연동 보호자 휴대폰으로 실제 SMS 발송(`backend/api/sms.py`). 키(`SOLAPI_*`)는 `.env`에서 읽고, 미설정 시 발송을 건너뛴다(테스트/CI). 발송 실패는 삼키고 `emergency_notification` 이력은 그대로 남긴다 |
+| 알림(응급) | 솔라피(Solapi) SMS | `solapi` 5.0.3 | `notified` 전환 시 연동 보호자 휴대폰으로 실제 SMS 발송(`backend/api/sms.py`). 키(`SOLAPI_*`)는 `.env`에서 읽고, 미설정 시 발송을 건너뛴다(테스트/CI). 발송 실패는 삼키고 `emergency_notification` 이력은 그대로 남긴다. `/notify/` 재호출은 멱등(재발송 없음) |
+| 알림(운동) | expo-notifications / @react-native-community/datetimepicker | ~55.0.27 / 8.6.0 | 서버 발송이 아닌 **기기 로컬** 매일 반복 알림. `ProfileScreen`에서 시각 설정 → `AsyncStorage`에 저장 + OS에 daily trigger 예약(`frontend/src/notifications/exerciseReminder.ts`). 백엔드 연동 없음(`exercise_mission.scheduled_at`과는 별개) |
 
 ### 3.2 시스템 구성도
 
-자세 추정 파이프라인은 `[카메라 프레임 획득] → [MediaPipe PoseLandmarker Keypoint 추출] → [관절 각도 계산 → 기준 포즈 시퀀스 매칭]` 과 `[Keypoint 시계열 → 경량 1D-CNN → 낙상·무활동 감지]` 두 갈래로 분기되는 구조이며, 모델 학습 데이터는 ETRI-Activity3D를 사용합니다. 관절 추출부터 두 갈래의 판정까지가 이번 vision 통합으로 앱(`frontend/src/pose/`, `frontend/plugins/native/`)에 들어왔고, 모델 학습·추론 개발만 별도 `VideoTensor` 트랙에 남아 있습니다.
+자세 추정 파이프라인은 `[카메라 프레임 획득] → [MediaPipe PoseLandmarker Keypoint 추출] → [관절 각도 계산 → 기준 포즈 시퀀스 매칭]` 과 `[Keypoint 시계열 → 경량 1D-CNN → 낙상 감지]` 두 갈래로 분기되는 구조이며, 모델 학습 데이터는 ETRI-Activity3D를 사용합니다. 관절 추출부터 두 갈래의 판정까지가 이번 vision 통합으로 앱(`frontend/src/pose/`, `frontend/plugins/native/`)에 들어왔고, 모델 학습·추론 개발만 별도 `VideoTensor` 트랙에 남아 있습니다. 무활동 감지는 별도 분류기 없이 `activity_log`(기기 활동 로그) 수집만 구현돼 있으며, 자동 판정 로직은 아직 없습니다(4.6절 참고).
 
 전체 흐름은 다음과 같습니다.
 
 - **프론트엔드(Expo/React Native)**가 카메라 프레임을 획득하고, 온디바이스 네이티브 프레임 프로세서(`react-native-vision-camera` + MediaPipe PoseLandmarker, `frontend/plugins/native/`)가 33개 관절 좌표를 추출합니다. 그 좌표를 `frontend/src/pose/`의 판정 로직이 받아 (1) 운동 중에는 기준 포즈 시퀀스(`WORKOUT_POSE_SEQUENCES`)와 매칭해 단계 진행을 집계하고, (2) 상시로는 `fall_cnn_quant.tflite`로 낙상 여부를 분류합니다. (BlazePose 모델·CNN 학습 자체는 별도 트랙.)
 - 운동 결과(`completion_rate`/`accuracy_avg`)와 응급 이벤트(`event_type`/`detection_source`)는 클라이언트가 계산까지 마친 값을 **백엔드(Django REST API)**로 전송하며, 백엔드는 이 값을 검증·저장·조회하는 역할만 담당합니다(AI 모델 경계). 관절별 편차(`pose_feedback`)는 현재 포즈 매처가 통과/실패만 반환해 실측값이 없어 프론트에서 전송하지 않습니다(엔드포인트는 대기 상태로 보존).
-- 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이되며, `notified` 상태가 되면 보호자 앱에 알림 레코드가 남고 연동 보호자 휴대폰으로 솔라피(Solapi) SMS가 발송되며(`SOLAPI_*` 미설정 시 발송 스킵), 제한 시간 동안 카메라 접근 권한(`camera_access_grant`)이 부여됩니다.
+- 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이됩니다. 낙상이 확정되면 시니어 화면에 **1차 확인 UI**(`EmergencyCheckOverlay`, 알람+진동+전체화면 팝업)가 뜨고 `first_check`로 전환합니다. 시니어가 "괜찮아요"를 누르면 `false_alarm`으로, "도움이 필요해요"를 누르거나 30초간 무응답이면 자동으로 `notified`로 전환되며 보호자 앱에 알림 레코드가 남고 연동 보호자 휴대폰으로 솔라피(Solapi) SMS가 발송됩니다(`SOLAPI_*` 미설정 시 발송 스킵, `/notify/` 재호출은 멱등). 이 시간 동안 카메라 접근 권한(`camera_access_grant`)이 제한 시간 부여됩니다.
 - 보호자 앱은 매핑된 피보호자의 프로필·운동 이력·응급 이력을 조회 전용으로 볼 수 있고, 시니어 본인만 자신의 데이터를 쓸 수 있습니다(IDOR 방지 권한 설계).
 
 ## 4. 개발 결과
@@ -305,9 +306,11 @@ silvervision/
     ├── docs/ASSEMBLY.md      # src/pose 수동 포팅 절차·동기화 체크리스트
     ├── src/
     │   ├── api/client.ts      # 공통 API 클라이언트(fetch 래퍼, JWT 저장/첨부/재발급)
+    │   ├── components/        # EmergencyCheckOverlay.tsx(1차 확인 UI) · TabScreenLayout 등 공용 컴포넌트
     │   ├── context/AppStateContext.tsx
     │   ├── navigation/types.ts
     │   ├── labels.ts          # 백엔드 enum ↔ 화면 라벨 공용 매핑
+    │   ├── notifications/     # exerciseReminder.ts — 운동 알림 시각 설정 (기기 로컬, expo-notifications)
     │   ├── pose/              # exercise/(운동 자세 매칭)·fall/(낙상 감지) 온디바이스 판정 로직 + screenMapping.ts(좌표 변환) — frontend/AGENTS.md 9장
     │   ├── screens/            # common/ senior/ guardian/ — 4.4절 참고
     │   ├── theme/theme.ts
@@ -326,9 +329,9 @@ silvervision/
 | 시니어 | SignupScreen | ✅ 완료 | 회원가입 → 즉시 로그인 |
 | 시니어 | SeniorHomeScreen | ✅ 완료 | 프로필 + 랭킹 조회 |
 | 시니어 | ExerciseSelectScreen | ✅ 완료 | 운동 목록 조회 |
-| 시니어 | ExerciseProgressScreen | ✅ 완료 | **카메라 기반 실시간 포즈 시퀀스 매칭 + 낙상 감지가 실제 동작**(더 이상 placeholder 아님). 진입 시 미션→세션 자동 생성, `completion_rate`=파이프라인이 집계한 단계 통과율, 낙상 확정 시 `POST /emergency/` |
+| 시니어 | ExerciseProgressScreen | ✅ 완료 | **카메라 기반 실시간 포즈 시퀀스 매칭 + 낙상 감지가 실제 동작**(더 이상 placeholder 아님). 진입 시 미션→세션 자동 생성, `completion_rate`=파이프라인이 집계한 단계 통과율, 낙상 확정 시 `POST /emergency/` + 1차 확인 UI(`EmergencyCheckOverlay`) 표시. 세션 생성 실패 시 안내 배너 표시(카메라 판정·낙상 감지는 계속 동작) |
 | 시니어 | ExerciseFeedbackScreen | ✅ 완료 | 세션 완료 PATCH. 응답의 하루 목표 진행도(`today_completed`/`daily_goal`)와 열매 지급 결과(`fruit_awarded`)를 읽어 표시(프론트가 임의로 "+1"을 띄우지 않음) |
-| 시니어 | ProfileScreen | ✅ 완료 | 프로필 조회/수정 |
+| 시니어 | ProfileScreen | ✅ 완료 | 프로필 조회/수정, 로그아웃, 매칭 코드 표시(코드 직접 등록 방식 — 카메라 스캔 아님), 운동 알림 시각 설정(로컬) |
 | 시니어 | AbilityHistoryScreen | ✅ 완료 | 장기 신체 능력(관절 가동범위·동작 완성도) 추이 조회 (조회 전용). 기록 생성 `POST`는 비전 실측값 대기 |
 | 보호자 | GuardianLoginScreen | ✅ 완료 | 보호자 로그인 + 프로필 조회 |
 | 보호자 | GuardianSignupScreen | ✅ 완료 | 회원가입 → 즉시 로그인 |
@@ -337,10 +340,46 @@ silvervision/
 | 보호자 | SeniorDetailScreen | ✅ 완료 | 프로필/세션/운동/응급 병렬 조회, 매핑 해제 |
 | 보호자 | GuardianActivityListScreen | ✅ 완료 | 피보호자별 대시보드 집계 |
 | 보호자 | AlertHistoryScreen | ✅ 완료 | 응급 이벤트 목록 조회 |
-| 보호자 | AlertDetailScreen | ✅ 완료 | 응급 상세 조회 + 상태 전이(PATCH). 상세 분석 타임라인(`TIMELINE`)은 비전팀 몫이라 목업 유지 |
-| 보호자 | GuardianProfileScreen | ✅ 완료 | 프로필 조회/수정, 피보호자 목록 |
+| 보호자 | AlertDetailScreen | ✅ 완료 | 응급 상세 조회(`detection_source` 실값 표시) + 상태 전이(PATCH). **상세 분석 시각화(타임라인·가속도값·낙상지수·스켈레톤 리플레이)는 전부 비전팀 몫이라 목업 유지** — 실측 센서/영상 데이터 없음 |
+| 보호자 | GuardianProfileScreen | ✅ 완료 | 프로필 조회/수정, 로그아웃, 피보호자 목록 |
 
-> `VoiceAssistantModal`은 화면 목록(18개)에 포함되지 않은 별도 컴포넌트로, 음성 인식 기능 설계가 미확정이라 포팅만 완료된 채 미마운트 상태입니다.
+### 4.5 중간보고서 대비 요구사항 변경사항
+
+중간보고서(2026년 6월) 대비 아래와 같이 요구사항이 변경되었습니다.
+
+- **응급 알림 채널**: FCM → **솔라피(Solapi) SMS**. FCM은 발송 연동이 계속 미뤄져 왔고, 응급 알림은 확실한 도달이 우선이라 실제 발송까지 되는 SMS로 대체
+- **피보호자 매핑 코드**: 카메라 바코드 스캔 → **코드 직접 입력**. 실카메라 스캔은 신규 의존성 부담이 커 범위 밖으로 두고, 문구·UI도 "스캔"이 아닌 "입력"에 맞게 정정
+- **음성 SOS 키워드 인식**: 진행 중 → **스코프에서 완전히 제외**(마이크 버튼·관련 컴포넌트 코드까지 삭제). 남은 일정 내 신뢰성 있는 구현이 어렵다고 판단
+- **보호자 위치 확인(GPS)**: 착수 단계 목표 → **제외**. DB에 위경도 필드 자체가 없어 사실상 보류 상태였음
+- **낙상 시 영상 클립 저장/재생**: **제외**(구축 비용 대비 우선순위 낮음)
+- **운동 알림**: `exercise_mission.scheduled_at` 기반 설계 → **기기 로컬 매일 반복 알림**으로 단순화(서버 연동 없음)
+- **응급 1차 확인**: 백엔드 상태 머신만 설계 → **프론트 UI(`EmergencyCheckOverlay`) 구현 완료**(알람+진동+팝업, 응답에 따라 `false_alarm`/`notified` 전이)
+
+### 4.6 다음 단계 및 알려진 한계
+
+**다음 단계(미착수, 향후 과제)**
+
+- 보호자 앱 실시간 카메라 스트리밍(현재는 접근 권한만 부여, 실제 영상 송출 없음)
+- `AlertDetailScreen` 상세 분석 시각화(타임라인·가속도값·낙상지수·리플레이) — 전부 목업
+- 비밀번호 변경/재설정 API, 매핑 등록 전 시니어 검색 API
+- 관절별 편차 실측(`pose_feedback`) — 매처가 통과/실패만 반환해 관련 엔드포인트 휴면 (4.2절)
+- **무활동 자동 감지** — `activity_log`는 로그 수집만 하고, 이를 실제로 판정해 응급 이벤트를 자동 생성하는 로직은 없음(타입·라벨만 존재). 현재 자동 감지되는 건 낙상뿐
+
+**알려진 한계**
+
+- 운동 알림(로컬)은 기기 전원이 꺼진 동안 울리지 않고, 재부팅 후 앱을 안 열면 재예약 안 됨. 제조사 배터리 최적화로 지연 가능
+- 낙상 판정 로직은 `VideoTensor` 프로토타입에서 이식된 것으로, 재학습·정확도 개선은 별도 트랙에서 진행 중(실측 성능은 4.7절)
+
+### 4.7 낙상 감지 모델 성능
+
+`VideoTensor` 트랙(별도 저장소)에서 ETRI-Activity3D 기반으로 측정한 낙상 분류기(`fall_cnn_quant.tflite`) 실측 성능입니다. 지도교수님 피드백은 테스트 이후 추가 고도화였으나, 남은 일정을 감안해 이번 보고에서는 고도화 대신 실측치를 그대로 보고합니다.
+
+| 지표 | 값 | 비고 |
+|---|---|---|
+| 재현율(Recall) | 96.8% | 실제 낙상을 낙상으로 판정한 비율 |
+| 오탐율(False Positive Rate) | 1.1% | 낙상이 아닌 상황을 낙상으로 잘못 판정한 비율 |
+| 처리 속도 | 초당 10프레임(FPS) | 온디바이스(앱 내) 실시간 추론 기준 |
+| 무활동 감지 | 미포함 | 이 분류기는 낙상만 판별하며, 무활동은 4.6절 "다음 단계" 참고 |
 
 ## 5. 설치 및 실행 방법
 
@@ -494,9 +533,9 @@ adb reverse tcp:8000 tcp:8000
 
 | 이름 | 이메일 | 주요 역할 | 세부 담당 |
 |---|---|---|---|
-| 강서영 | (추후 기재) | 백엔드 개발 + API 통합 | Django/DRF 기반 REST API 24개 엔드포인트 설계·구현, MySQL DB 스키마 13개 테이블 설계, JWT 인증(`RoleBasedJWTAuthentication`) 및 IDOR 방지 권한 설계, 응급 이벤트 상태 머신 구현 |
-| 박소영 | (추후 기재) | 프론트엔드 개발 + UI/UX 설계 | Expo(React Native)+TypeScript 기반 화면 18개 구현, 시니어/보호자 UX 분리 설계(4자리 PIN vs 일반 비밀번호 등 접근성 고려), 노년 특화 모델용 Keypoint 추출·데이터 라벨링 지원 |
-| 주은택 | (추후 기재) | AI/비전 모듈 개발 (Pose Estimation) | MediaPipe 기반 관절 좌표 추출, 1D-CNN 낙상 분류 모델(`VideoTensor` 프로토타입) 설계·실기기 튜닝. **검증을 마친 자세 매칭·낙상 판정 로직은 이번 vision 통합으로 `frontend/src/pose/`에 편입 완료** (모델 학습·추론 개발 자체는 계속 `VideoTensor` 트랙에서 진행) |
+| 강서영 | ksksyy25@pusan.ac.kr | 백엔드 개발 + API 통합 | Django/DRF 기반 REST API 24개 엔드포인트 설계·구현, MySQL DB 스키마 13개 테이블 설계, JWT 인증(`RoleBasedJWTAuthentication`) 및 IDOR 방지 권한 설계, 응급 이벤트 상태 머신 구현, 솔라피 SMS 연동 |
+| 박소영 | kye625@pusan.ac.kr | 프론트엔드 개발 + UI/UX 설계 | Expo(React Native)+TypeScript 기반 화면 18개 구현, 시니어/보호자 UX 분리 설계(4자리 PIN vs 일반 비밀번호 등 접근성 고려), 노년 특화 모델용 Keypoint 추출·데이터 라벨링 지원 |
+| 주은택 | jueuntek@pusan.ac.kr | AI/비전 모듈 개발 (Pose Estimation) | MediaPipe 기반 관절 좌표 추출, 1D-CNN 낙상 분류 모델(`VideoTensor` 프로토타입) 설계·실기기 튜닝. **검증을 마친 자세 매칭·낙상 판정 로직은 이번 vision 통합으로 `frontend/src/pose/`에 편입 완료** (모델 학습·추론 개발 자체는 계속 `VideoTensor` 트랙에서 진행) |
 
 > **역할 변경 이력**: 착수보고서 원안에는 강서영이 AI 모델(낙상 감지 알고리즘)도 겸임하는 것으로, 주은택은 "백엔드 + AI 모델" 공동 담당으로 명시되어 있었습니다. 중간보고서 단계에서 비전(Computer Vision) 파트를 주은택이 전담하는 것으로 역할이 재조정되었습니다. AI 모델 **학습·추론 개발**은 여전히 `frontend/`·`backend/` 밖 `VideoTensor` 트랙에서 진행되지만, 실기기 검증을 마친 **자세 매칭·낙상 감지 판정 로직**은 사람이 직접 `frontend/src/pose/`로 포팅해 이번 병합으로 앱에 통합되었습니다(절차: `frontend/docs/ASSEMBLY.md`).
 
