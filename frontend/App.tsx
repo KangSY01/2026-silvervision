@@ -1,9 +1,11 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppStateProvider } from './src/context/AppStateContext';
+import { syncScheduledReminder } from './src/notifications/exerciseReminder';
 import { RootStackParamList } from './src/navigation/types';
 import EntryScreen from './src/screens/common/EntryScreen';
 import LoginScreen from './src/screens/common/LoginScreen';
@@ -28,6 +30,12 @@ import SignupScreen from './src/screens/senior/SignupScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
+  // 앱 시작 시 저장된 운동 알림 설정과 실제 OS 예약 상태를 동기화한다
+  // (재설치·업데이트로 예약이 날아간 경우 대비). 실패해도 앱 구동에는 영향 없음.
+  useEffect(() => {
+    syncScheduledReminder();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <View style={styles.webContainer}>

@@ -36,7 +36,9 @@
           "enableMicrophonePermission": false
         }
       ],
-      "./plugins/withPoseDetector.js"
+      "./plugins/withPoseDetector.js",
+      "@react-native-community/datetimepicker",
+      "expo-notifications"
     ]
   }
 }
