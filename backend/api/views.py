@@ -746,11 +746,17 @@ class EmergencyNotifyView(APIView):
     발송을 시도하지 않고 건너뛴다(row는 그대로 생성). SOLAPI_API_KEY가
     비어 있으면(테스트/CI) send_emergency_sms가 실제 호출 없이 통과한다.
 
-    성공 시 status를 notified로 전환한다(이미 notified면 멱등하게
-    통과). first_check를 거치지 않은 상태(detected)이거나 이미
-    종결된 상태(resolved/false_alarm)에서는 상태 전이 규칙 위반이라
-    400으로 거부한다 - first_check로 먼저 PATCH한 뒤 notify를
-    호출해야 한다.
+    성공 시 status를 notified로 전환한다. first_check를 거치지 않은
+    상태(detected)이거나 이미 종결된 상태(resolved/false_alarm)에서는
+    상태 전이 규칙 위반이라 400으로 거부한다 - first_check로 먼저
+    PATCH한 뒤 notify를 호출해야 한다.
+
+    **멱등성**: 이미 notified 상태인 event에 /notify/를 다시 호출하면
+    (네트워크 재시도 등) 알림 row를 새로 만들지 않고 SMS도 재발송하지
+    않는다. 기존 알림 이력만 200으로 반환한다. 처음 notified로 전이하는
+    호출에서만 보호자별 row 생성 + SMS 발송이 일어난다. 동시 요청이
+    둘 다 "처음 전이"로 판단하는 극단적 race는 EmergencyNotification의
+    unique_together(event, guardian) + get_or_create로 막는다.
     """
     permission_classes = (IsSeniorOrGuardian,)
 
@@ -760,7 +766,9 @@ class EmergencyNotifyView(APIView):
         )
 
         target_status = EmergencyEvent.Status.NOTIFIED
-        if event.status != target_status:
+        # 이번 호출로 처음 notified로 전이하는지, 이미 notified였는지 구분한다.
+        already_notified = event.status == target_status
+        if not already_notified:
             if not is_valid_emergency_transition(event.status, target_status):
                 return Response(
                     {
@@ -773,6 +781,14 @@ class EmergencyNotifyView(APIView):
                 )
             event.status = target_status
             event.save(update_fields=['status'])
+
+        # 이미 notified 상태였다면(네트워크 타임아웃 후 재시도 등으로 /notify/가
+        # 두 번 호출된 경우) 알림 row를 새로 만들지 않고 SMS도 보내지 않는다.
+        # 기존 알림 이력만 그대로 반환한다(신규 생성이 아니므로 200).
+        if already_notified:
+            existing = EmergencyNotification.objects.filter(event=event)
+            output = EmergencyNotificationSerializer(existing, many=True)
+            return Response(output.data, status=status.HTTP_200_OK)
 
         guardian_id = request.data.get('guardian')
         if guardian_id is not None:
@@ -794,10 +810,14 @@ class EmergencyNotifyView(APIView):
 
         notifications = []
         for gid in guardian_ids:
-            notification = EmergencyNotification.objects.create(
-                event=event, guardian_id=gid, channel='sms',
+            # get_or_create로 유니크 제약(event, guardian) race condition에서도
+            # 500 대신 기존 row를 조용히 반환한다. SMS는 새로 만든 경우에만 보낸다.
+            notification, created = EmergencyNotification.objects.get_or_create(
+                event=event, guardian_id=gid, defaults={'channel': 'sms'},
             )
             notifications.append(notification)
+            if not created:
+                continue
 
             guardian = notification.guardian
             if (guardian.phone or '').strip():

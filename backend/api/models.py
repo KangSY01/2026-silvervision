@@ -267,6 +267,9 @@ class EmergencyNotification(models.Model):
 
     class Meta:
         db_table = 'emergency_notification'
+        # 한 이벤트에 대해 보호자당 알림은 1건. /notify/ 재호출·동시 요청이
+        # 중복 row(및 중복 SMS)를 만드는 것을 DB 차원에서 막는 마지막 안전망.
+        unique_together = ('event', 'guardian')
 
     def __str__(self):
         return f'{self.event_id} -> {self.guardian_id} ({self.channel})'

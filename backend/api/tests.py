@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -1064,3 +1065,64 @@ class RegisterPasswordRuleTests(ApiTestBase):
             self.guardian_url, self._guardian_payload('abcd1234'), format='json',
         )
         self.assertEqual(ok.status_code, status.HTTP_201_CREATED)
+
+
+class EmergencyNotifyTests(ApiTestBase):
+    def setUp(self):
+        self.senior = self.make_senior('senior1', 'BARCODE-1')
+        self.guardian_a = self.make_guardian('g1')
+        self.guardian_b = self.make_guardian('g2')
+        GuardianSeniorMap.objects.create(
+            guardian=self.guardian_a, senior=self.senior,
+            registered_via='id_search',
+        )
+        GuardianSeniorMap.objects.create(
+            guardian=self.guardian_b, senior=self.senior,
+            registered_via='id_search',
+        )
+        # notify는 first_check를 거친 상태에서만 허용된다.
+        self.event = EmergencyEvent.objects.create(
+            senior=self.senior, event_type=EmergencyEvent.EventType.FALL,
+            detection_source='vision',
+            status=EmergencyEvent.Status.FIRST_CHECK,
+        )
+        self.url = f'/api/v1/emergency/{self.event.event_id}/notify/'
+
+    def test_double_notify_is_idempotent(self):
+        """같은 event로 /notify/를 두 번 연속 호출해도 알림 row·SMS가 중복되지 않는다."""
+        self.auth('senior', self.senior.senior_id)
+        with patch('api.views.send_emergency_sms', return_value=True) as mock_sms:
+            first = self.client.post(self.url, {}, format='json')
+            self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+            self.assertEqual(
+                EmergencyNotification.objects.filter(event=self.event).count(), 2,
+            )
+            self.assertEqual(mock_sms.call_count, 2)
+
+            second = self.client.post(self.url, {}, format='json')
+            # 신규 생성이 아니므로 200, 기존 이력을 그대로 반환한다.
+            self.assertEqual(second.status_code, status.HTTP_200_OK)
+            self.assertEqual(len(second.data), 2)
+            # row 수가 늘지 않고, 두 번째 호출에선 SMS도 보내지 않는다.
+            self.assertEqual(
+                EmergencyNotification.objects.filter(event=self.event).count(), 2,
+            )
+            self.assertEqual(mock_sms.call_count, 2)
+
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.status, EmergencyEvent.Status.NOTIFIED)
+
+    def test_first_transition_skips_sms_for_preexisting_row(self):
+        """race 등으로 일부 보호자 row가 이미 있으면 그 보호자에겐 SMS를 재발송하지 않는다."""
+        EmergencyNotification.objects.create(
+            event=self.event, guardian=self.guardian_a, channel='sms',
+        )
+        self.auth('senior', self.senior.senior_id)
+        with patch('api.views.send_emergency_sms', return_value=True) as mock_sms:
+            res = self.client.post(self.url, {}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            EmergencyNotification.objects.filter(event=self.event).count(), 2,
+        )
+        # 새로 만든 guardian_b 한 명에게만 발송.
+        self.assertEqual(mock_sms.call_count, 1)
