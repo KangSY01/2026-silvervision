@@ -49,8 +49,8 @@
 | 비교 항목 | 일반 mHealth 운동 앱 | 실버비전 |
 |---|---|---|
 | 노년 특화 자세 인식 기준 | 일반 성인 기준 동작 인식 | BlazePose 기반, 노년 신체 특성(근감소증·관절 가동 범위 제한) 반영한 관절 각도 기준값(`reference_angles`) |
-| 낙상 감지 | 미제공 | 온디바이스 관절 시계열 → 경량 1D-CNN(`fall_cnn_quant.tflite`) 실시간 낙상 감지(재현율 96.8%, 오탐율 1.1%, 10FPS — 4.7절 참고). 판정 로직이 앱(`frontend/src/pose/fall/`)에 내장돼 직접 동작. 무활동 감지는 로그 수집만 있고 자동 판정은 다음 단계(4.6절) |
-| 응급 대응 통합 | 별도 미제공(운동 기능과 분리) | 감지 → 1차 확인 → 보호자 알림(SMS) → 카메라 제한적 접근 → 상황 종료까지 하나의 상태 머신으로 통합 |
+| 낙상 감지 | 미제공 | 온디바이스 관절 시계열 → 경량 1D-CNN(`fall_cnn_quant.tflite`) 실시간 낙상 감지(재현율 96.8%, 오탐율 1.1%, 10FPS — 4.7절 참고). 판정 로직이 앱(`frontend/src/pose/fall/`)에 내장돼 직접 동작. 무활동 감지는 로그를 기록할 기기 쪽 코드가 없어 파이프라인 자체가 미연동(4.6절) |
+| 응급 대응 통합 | 별도 미제공(운동 기능과 분리) | 감지 → 1차 확인 → 보호자 알림(SMS) → 상황 종료까지 하나의 상태 머신으로 통합 |
 | 보호자 연동 | 미제공 또는 단순 공유 | 다중 피보호자 등록·관리, 활동·응급 이력 실시간 조회 |
 | 별도 하드웨어 필요 여부 | 앱 단독(웨어러블 연동형도 존재) | 불필요(스마트폰 카메라만으로 자세 추정 + 응급 감지) |
 | 보상/동기부여 체계 | 앱마다 상이 | 운동 완료 시 열매 보상 + 전국/지역 랭킹(게임화) |
@@ -88,13 +88,13 @@
 
 ### 3.2 시스템 구성도
 
-자세 추정 파이프라인은 `[카메라 프레임 획득] → [MediaPipe PoseLandmarker Keypoint 추출] → [관절 각도 계산 → 기준 포즈 시퀀스 매칭]` 과 `[Keypoint 시계열 → 경량 1D-CNN → 낙상 감지]` 두 갈래로 분기되는 구조이며, 모델 학습 데이터는 ETRI-Activity3D를 사용합니다. 관절 추출부터 두 갈래의 판정까지가 이번 vision 통합으로 앱(`frontend/src/pose/`, `frontend/plugins/native/`)에 들어왔고, 모델 학습·추론 개발만 별도 `VideoTensor` 트랙에 남아 있습니다. 무활동 감지는 별도 분류기 없이 `activity_log`(기기 활동 로그) 수집만 구현돼 있으며, 자동 판정 로직은 아직 없습니다(4.6절 참고).
+자세 추정 파이프라인은 `[카메라 프레임 획득] → [MediaPipe PoseLandmarker Keypoint 추출] → [관절 각도 계산 → 기준 포즈 시퀀스 매칭]` 과 `[Keypoint 시계열 → 경량 1D-CNN → 낙상 감지]` 두 갈래로 분기되는 구조이며, 모델 학습 데이터는 ETRI-Activity3D를 사용합니다. 관절 추출부터 두 갈래의 판정까지가 이번 vision 통합으로 앱(`frontend/src/pose/`, `frontend/plugins/native/`)에 들어왔고, 모델 학습·추론 개발만 별도 `VideoTensor` 트랙에 남아 있습니다. 무활동 감지는 `activity_log`(기기 활동 로그) 테이블과 조회 API만 있을 뿐, 로그를 기록하는 기기 쪽 코드가 없어 파이프라인 전체가 미연동 상태입니다(4.6절 참고).
 
 전체 흐름은 다음과 같습니다.
 
 - **프론트엔드(Expo/React Native)**가 카메라 프레임을 획득하고, 온디바이스 네이티브 프레임 프로세서(`react-native-vision-camera` + MediaPipe PoseLandmarker, `frontend/plugins/native/`)가 33개 관절 좌표를 추출합니다. 그 좌표를 `frontend/src/pose/`의 판정 로직이 받아 (1) 운동 중에는 기준 포즈 시퀀스(`WORKOUT_POSE_SEQUENCES`)와 매칭해 단계 진행을 집계하고, (2) 상시로는 `fall_cnn_quant.tflite`로 낙상 여부를 분류합니다. (BlazePose 모델·CNN 학습 자체는 별도 트랙.)
 - 운동 결과(`completion_rate`/`accuracy_avg`)와 응급 이벤트(`event_type`/`detection_source`)는 클라이언트가 계산까지 마친 값을 **백엔드(Django REST API)**로 전송하며, 백엔드는 이 값을 검증·저장·조회하는 역할만 담당합니다(AI 모델 경계). 관절별 편차(`pose_feedback`)는 현재 포즈 매처가 통과/실패만 반환해 실측값이 없어 프론트에서 전송하지 않습니다(엔드포인트는 대기 상태로 보존).
-- 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이됩니다. 낙상이 확정되면 시니어 화면에 **1차 확인 UI**(`EmergencyCheckOverlay`, 알람+진동+전체화면 팝업)가 뜨고 `first_check`로 전환합니다. 시니어가 "괜찮아요"를 누르면 `false_alarm`으로, "도움이 필요해요"를 누르거나 30초간 무응답이면 자동으로 `notified`로 전환되며 보호자 앱에 알림 레코드가 남고 연동 보호자 휴대폰으로 솔라피(Solapi) SMS가 발송됩니다(`SOLAPI_*` 미설정 시 발송 스킵, `/notify/` 재호출은 멱등). 이 시간 동안 카메라 접근 권한(`camera_access_grant`)이 제한 시간 부여됩니다.
+- 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이됩니다. 낙상이 확정되면 시니어 화면에 **1차 확인 UI**(`EmergencyCheckOverlay`, 알람+진동+전체화면 팝업)가 뜨고 `first_check`로 전환합니다. 시니어가 "괜찮아요"를 누르면 `false_alarm`으로, "도움이 필요해요"를 누르거나 30초간 무응답이면 자동으로 `notified`로 전환되며 보호자 앱에 알림 레코드가 남고 연동 보호자 휴대폰으로 솔라피(Solapi) SMS가 발송됩니다(`SOLAPI_*` 미설정 시 발송 스킵, `/notify/` 재호출은 멱등). 실제 앱 흐름은 여기까지이며, 카메라 접근 권한 부여(`camera_access_grant`)는 백엔드 엔드포인트만 존재하고 프론트엔드에서 호출하지 않아 현재 트리거되지 않습니다(4.6절 참고).
 - 보호자 앱은 매핑된 피보호자의 프로필·운동 이력·응급 이력을 조회 전용으로 볼 수 있고, 시니어 본인만 자신의 데이터를 쓸 수 있습니다(IDOR 방지 권한 설계).
 
 ## 4. 개발 결과
@@ -270,10 +270,12 @@ erDiagram
 | 응급 | GET·POST | `emergency/` | 응급 이벤트 목록 조회 / 생성 | GET: 본인·매핑된 보호자 / POST: 본인 |
 | 응급 | GET·PATCH | `emergency/{event_id}/` | 이벤트 상세(알림·카메라권한 nested) / 상태 전이 | 본인·매핑된 보호자 |
 | 응급 | POST | `emergency/{event_id}/notify/` | 보호자 알림 레코드 생성 + SMS 발송. 이미 `notified`면 재발송 없이 기존 이력만 반환(재호출 멱등) | 본인·매핑된 보호자 |
-| 응급 | POST·DELETE | `emergency/{event_id}/camera-grant/` | 카메라 접근 권한 부여/즉시 만료 | 본인·매핑된 보호자 |
+| 응급 | POST·DELETE | `emergency/{event_id}/camera-grant/` | 카메라 접근 권한 부여/즉시 만료. 구현·테스트는 완료됐으나 **프론트엔드에서 호출하지 않아 현재 앱 흐름에서는 트리거되지 않음**(4.6절) | 본인·매핑된 보호자 |
 | 게임화 | GET | `senior/{senior_id}/ranking/` | 전국/지역 최신 랭킹 스냅샷 조회 | 본인 |
 
-<a id="dagger"></a>**†  휴면 엔드포인트**: `feedback/`는 예전에 `ExerciseFeedbackScreen`이 placeholder 편차값을 보냈으나, 포즈 매처(`src/pose/exercise/matcher.ts`)가 통과/실패(boolean)만 반환해 실측 관절 편차가 없어 호출을 제거했습니다. 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값(단계 통과율)이고, `ability-log/` POST(관절 가동범위·동작 완성도)도 실측 소스가 없어 프론트가 호출하지 않습니다. matcher가 각도 편차를 함께 반환하도록 확장되면 세 지점 모두 다시 연결됩니다. 엔드포인트·시리얼라이저·테스트는 그대로 남아 있습니다.
+<a id="dagger"></a>**†  휴면 엔드포인트**: `feedback/`는 예전에 `ExerciseFeedbackScreen`이 placeholder 편차값을 보냈으나, 포즈 매처(`src/pose/exercise/matcher.ts`)가 통과/실패(boolean)만 반환해 실측 관절 편차가 없어 호출을 제거했습니다. 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값(단계 통과율)이고, `ability-log/` POST(관절 가동범위·동작 완성도)도 실측 소스가 없어 프론트가 호출하지 않습니다. matcher가 각도 편차를 함께 반환하도록 확장되면 세 지점 모두 다시 연결됩니다.
+
+전수 감사(2026-09-09) 결과 아래 5개도 같은 패턴(백엔드 구현·프론트 미호출)으로 추가 확인됐습니다: `GET exercises/{id}/`(목록·상세 시리얼라이저가 동일해 상세 조회 이점이 없음), `GET senior/{id}/missions/`·`PATCH .../missions/{mission_id}/`(미션 목록 화면이 없고 완료 집계는 `ExerciseSession.completion_rate`만으로 함. 이 `PATCH` 엔드포인트 자체는 여전히 프론트에서 호출되지 않지만, `mission.status`는 세션 완료 시점에 백엔드가 직접 `completed`로 갱신하도록 2026-09-09에 수정됨), `GET senior/{id}/sessions/{session_id}/`(세션 상세의 `pose_feedbacks` nested 응답에 도달하는 화면 없음), `POST senior/{id}/activity-log/`(로그를 실제로 기록할 시니어 기기 쪽 코드가 없어 무활동 감지 파이프라인 전체가 미연동). 이 중 `GET exercises/{id}/`·`GET·PATCH .../missions/*`는 백엔드 테스트도 없습니다(구현만 됨). 위 모든 엔드포인트·시리얼라이저는 그대로 남아 있습니다.
 
 **미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 87건 통과).
 
@@ -359,11 +361,12 @@ silvervision/
 
 **다음 단계(미착수, 향후 과제)**
 
-- 보호자 앱 실시간 카메라 스트리밍(현재는 접근 권한만 부여, 실제 영상 송출 없음)
+- 보호자 앱 실시간 카메라 스트리밍 — 접근 권한 부여 엔드포인트(`camera_access_grant`)는 백엔드에 구현돼 있으나 프론트엔드가 호출하지 않아 현재 앱 흐름에서는 아예 트리거되지 않으며, 실제 영상 송출 기능도 없음. 실제 응급 흐름은 감지 → 1차 확인 → 보호자 SMS 알림 → 상황 종료로 끝남
 - `AlertDetailScreen` 상세 분석 시각화(타임라인·가속도값·낙상지수·리플레이) — 전부 목업
 - 비밀번호 변경/재설정 API, 매핑 등록 전 시니어 검색 API
 - 관절별 편차 실측(`pose_feedback`) — 매처가 통과/실패만 반환해 관련 엔드포인트 휴면 (4.2절)
-- **무활동 자동 감지** — `activity_log`는 로그 수집만 하고, 이를 실제로 판정해 응급 이벤트를 자동 생성하는 로직은 없음(타입·라벨만 존재). 현재 자동 감지되는 건 낙상뿐
+- **무활동 자동 감지** — `activity_log`는 로그 수집만 하고, 이를 실제로 판정해 응급 이벤트를 자동 생성하는 로직은 없음(타입·라벨만 존재). 로그를 기록할 시니어 기기 쪽 코드 자체가 없어 이 파이프라인은 완전히 미연동 상태
+- **SOS 긴급 호출** — `EmergencyEvent.event_type='sos'`도 무활동과 같은 패턴: 보호자 표시 라벨("SOS 긴급 호출")과 데모 시드 데이터에만 존재하고, 시니어 앱에 SOS 버튼 자체가 없어 프론트가 생성하는 일이 없음. 현재 자동/수동으로 실제 생성되는 `event_type`은 낙상(`fall`) 하나뿐
 
 **알려진 한계**
 
