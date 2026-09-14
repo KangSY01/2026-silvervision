@@ -36,6 +36,7 @@ from .permissions import (
     IsSeniorSelf,
     IsSeniorSelfOrMappedGuardian,
 )
+from .throttling import SeniorRegistrationThrottle
 from .serializers import (
     ActivityLogSerializer,
     AlreadyRegistered,
@@ -263,6 +264,12 @@ class GuardianSeniorListCreateView(generics.ListCreateAPIView):
     그 guardian_id로 필터링해 다른 보호자의 매핑이 섞이지 않게 한다.
     """
     permission_classes = (IsGuardianSelf,)
+
+    def get_throttles(self):
+        # 등록 시도(POST)만 제한한다 - 목록 조회(GET)는 악용 리스크가 없다.
+        if self.request.method == 'POST':
+            return [SeniorRegistrationThrottle()]
+        return []
 
     def get_queryset(self):
         return GuardianSeniorMap.objects.filter(

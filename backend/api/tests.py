@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework import status
@@ -80,10 +81,18 @@ class ApiTestBase(APITestCase):
 
 class GuardianSeniorMapTests(ApiTestBase):
     def setUp(self):
+        # SeniorRegistrationThrottle은 Django 캐시(기본 LocMemCache, 프로세스
+        # 전역·트랜잭션 롤백과 무관)에 카운트를 쌓으므로, 이 클래스의 여러
+        # 테스트가 같은 guardian_id로 반복 POST해도 서로 카운트가 섞이지
+        # 않도록 매 테스트 시작 전에 비운다.
+        cache.clear()
         self.guardian = self.make_guardian('g1')
         self.other_guardian = self.make_guardian('g2')
         self.senior = self.make_senior('senior1', 'BARCODE-1')
         self.url = f'/api/v1/guardian/{self.guardian.guardian_id}/seniors/'
+
+    def tearDown(self):
+        cache.clear()
 
     def test_register_by_login_id(self):
         self.auth('guardian', self.guardian.guardian_id)
@@ -157,6 +166,34 @@ class GuardianSeniorMapTests(ApiTestBase):
             self.url, {'registered_via': 'id_search'}, format='json',
         )
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_registration_throttled_after_ten_attempts_per_hour(self):
+        self.auth('guardian', self.guardian.guardian_id)
+        for _ in range(10):
+            res = self.client.post(
+                self.url, {'registered_via': 'id_search', 'login_id': 'nope'},
+                format='json',
+            )
+            self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+        res = self.client.post(
+            self.url, {'registered_via': 'id_search', 'login_id': 'nope'},
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertIn('Retry-After', res)
+
+    def test_registration_list_get_not_throttled(self):
+        # GET(목록 조회)은 senior_registration scope 대상이 아니므로
+        # POST 한도를 넘긴 뒤에도 계속 열려 있어야 한다.
+        self.auth('guardian', self.guardian.guardian_id)
+        for _ in range(10):
+            self.client.post(
+                self.url, {'registered_via': 'id_search', 'login_id': 'nope'},
+                format='json',
+            )
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
 
     def test_unlink_removes_mapping(self):
         GuardianSeniorMap.objects.create(

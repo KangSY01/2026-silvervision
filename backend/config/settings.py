@@ -159,6 +159,12 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'api.authentication.RoleBasedJWTAuthentication',
     ),
+    'DEFAULT_THROTTLE_RATES': {
+        # 피보호자 등록(POST /guardian/{id}/seniors/) 무차별 시도 방지.
+        # 정상 사용(보호자 1명이 여러 피보호자 등록)은 10회/시간이면 충분하고,
+        # login_id 순차 대입 같은 악용은 이 정도로도 비현실적으로 느려진다.
+        'senior_registration': '10/hour',
+    },
 }
 
 
