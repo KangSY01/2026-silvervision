@@ -226,7 +226,7 @@ export default function GuardianActivityListScreen() {
         <View style={styles.listSection}>
           <View style={styles.listHeaderRow}>
             <Text style={styles.listHeading}>모니터링 피보호자 ({rows.length}명)</Text>
-            <Text style={styles.listHeaderRight}>실시간 분석 중</Text>
+            <Text style={styles.listHeaderRight}>실시간 조회</Text>
           </View>
 
           {loadState === 'loading' ? (
@@ -299,8 +299,8 @@ export default function GuardianActivityListScreen() {
         {/* Information Notice */}
         <View style={styles.footnote}>
           <Text style={styles.footnoteText}>
-            실버비전 스마트 관절 분석 카메라는 어르신의 거실이나 스마트 기기 운동 시 실시간으로
-            비접촉식 낙상 감지 센서를 운용합니다.
+            실버비전은 어르신이 운동 화면을 사용하는 동안 카메라로 낙상 여부를
+            감지합니다. (상시 감시가 아닌, 운동 중에만 동작합니다)
           </Text>
         </View>
       </ScrollView>
