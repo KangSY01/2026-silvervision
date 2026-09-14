@@ -35,7 +35,7 @@ type EditableField = 'name' | 'phone' | 'address';
 const FIELD_LABEL: Record<EditableField, string> = {
   name: '성함',
   phone: '비상 연락처',
-  address: '비상 이송/거주지 주소',
+  address: '거주지 주소',
 };
 
 export default function GuardianProfileScreen() {

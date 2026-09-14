@@ -276,7 +276,7 @@ export default function SeniorDetailScreen() {
             {profile.medication || '등록된 복용약 없음'}
           </Text>
           <Text style={styles.healthText}>
-            <Text style={styles.healthLabel}>안전 거주: </Text>
+            <Text style={styles.healthLabel}>거주지 주소: </Text>
             {profile.address || '정보 없음'}
           </Text>
         </View>
