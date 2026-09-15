@@ -18,7 +18,7 @@ _마지막 전체 교차검증: 2026-09-06 (비전 갈래 ↔ 백엔드 갈래 �
 
 _2026-09-08 갱신: FCM 제거 → 솔라피(Solapi) SMS 실발송으로 교체. 마이그레이션 `0008`(`EmergencyNotification.channel` default `'fcm'`→`'sms'`) 추가. `.../notify/`가 `backend/api/sms.py`로 연동 보호자에게 실제 SMS를 보낸다(`SOLAPI_*` env 미설정 시 발송 스킵, `solapi` 패키지 `requirements.txt`에 추가)._
 
-_2026-09-09 갱신: `.../notify/` 중복 SMS 버그 수정. 마이그레이션 `0009`(`EmergencyNotification` unique_together `(event, guardian)`) 추가로 현재 `0001`~`0009`. `EmergencyNotifyView`는 이미 `notified`인 event 재호출 시 row·SMS를 재생성하지 않고 기존 이력만 200으로 반환한다(처음 전이 시에만 201 + 생성 + 발송), race는 `get_or_create`로 흡수. `api/tests.py`는 87건 통과(멱등성 테스트 2건 추가)._
+_2026-09-09 갱신: `.../notify/` 중복 SMS 버그 수정. 마이그레이션 `0009`(`EmergencyNotification` unique_together `(event, guardian)`) 추가로 현재 `0001`~`0009`. `EmergencyNotifyView`는 이미 `notified`인 event 재호출 시 row·SMS를 재생성하지 않고 기존 이력만 200으로 반환한다(처음 전이 시에만 201 + 생성 + 발송), race는 `get_or_create`로 흡수. `api/tests.py`는 87건 통과(멱등성 테스트 2건 추가). 이후 세션 완료 시 `ExerciseMission.status`를 `completed`로 자동 갱신(`ExerciseSessionDetailView.perform_update`, 화면 비노출·데이터 정합성 목적)하도록 수정, 미션 status 자동 완료 처리 테스트 1건 추가로 88건._
 
 이 문서는 두 영역을 아우르는 명령어와 아키텍처 요약만 다룬다. 화면 목록, 테이블 전체 목록 등 세부사항은 중복 기술하지 않으므로 위 문서를 참고할 것.
 
@@ -48,7 +48,7 @@ python manage.py runserver        # http://localhost:8000, API는 /api/v1/, admi
 
 python manage.py check                       # 시스템 체크
 python manage.py makemigrations --check       # 누락된 마이그레이션 확인 (모델 변경 후 필수)
-python manage.py test                         # 전체 테스트 — api/tests.py 87건
+python manage.py test                         # 전체 테스트 — api/tests.py 88건
 python manage.py test api.tests.ClassName.test_method   # 단일 테스트
 ```
 

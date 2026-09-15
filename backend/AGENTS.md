@@ -96,7 +96,7 @@
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) + `GET /exercises/` 응답의 `pose_workout_key`(포함·null 허용·choices 밖 값은 `full_clean()`에서 거부) + `.../notify/` 멱등성(재호출 시 `EmergencyNotification` row·SMS 미증가) 테스트 87건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) + `GET /exercises/` 응답의 `pose_workout_key`(포함·null 허용·choices 밖 값은 `full_clean()`에서 거부) + `.../notify/` 멱등성(재호출 시 `EmergencyNotification` row·SMS 미증가) + 세션 완료 시 미션 status `completed` 갱신(멱등 포함) 테스트 88건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 
