@@ -322,8 +322,8 @@ export default function GuardianHomeScreen() {
         {/* Info Footnote */}
         <View style={styles.footnote}>
           <Text style={styles.footnoteText}>
-            실버비전은 AI 관절 스켈레톤 추적 및 비접촉 스마트 센싱 기술을 적용해 365일 실시간
-            관제를 도우며, 사생활 유출을 차단합니다.
+            실버비전은 어르신이 운동 화면을 사용하는 동안 카메라로 낙상 여부를
+            감지합니다. (상시 감시가 아닌, 운동 중에만 동작합니다)
           </Text>
         </View>
       </ScrollView>

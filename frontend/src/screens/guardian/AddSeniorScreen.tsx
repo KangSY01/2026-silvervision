@@ -88,7 +88,7 @@ export default function AddSeniorScreen() {
       setRegisteredSenior(mapping.senior);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        setError('입력하신 정보와 일치하는 어르신을 찾을 수 없습니다. 아이디/바코드를 다시 확인해 주세요.');
+        setError('입력하신 정보와 일치하는 어르신을 찾을 수 없습니다. 아이디/코드를 다시 확인해 주세요.');
       } else if (err instanceof ApiError && err.status === 409) {
         setError('이미 등록된 피보호자입니다.');
       } else {

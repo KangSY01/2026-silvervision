@@ -339,8 +339,7 @@ export default function GuardianProfileScreen() {
         <View style={styles.safetyBadge}>
           <ShieldCheck size={26} color={colors.primary} />
           <Text style={styles.safetyBadgeText}>
-            해당 정보는 대한민국 시니어 보건복지 연동 안심 네트워크 데이터 보호 장치 암호화(SSL
-            256bit) 하에 철저하게 관리됩니다.
+            이 정보는 HTTPS 암호화 통신을 통해 안전하게 전송됩니다.
           </Text>
         </View>
 
