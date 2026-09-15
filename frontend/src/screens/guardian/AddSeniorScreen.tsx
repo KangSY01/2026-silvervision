@@ -4,11 +4,10 @@ import {
   Check,
   HelpCircle,
   QrCode,
-  Scan,
   Search,
   X,
 } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -55,24 +54,14 @@ export default function AddSeniorScreen() {
   const [scanSubmitting, setScanSubmitting] = useState(false);
 
   const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
 
   // 두 등록 경로(아이디/바코드)의 공통 성공 상태. 등록된 피보호자 요약(nested)을
   // 담아 성공 오버레이에 표시한다.
   const [registeredSenior, setRegisteredSenior] = useState<MappedSeniorResponse | null>(null);
 
-  // 스캔 뷰파인더 레이저 애니메이션은 순수 연출이다. 실제 카메라 기반 QR/바코드
-  // 스캔은 expo-camera 등 신규 네이티브 의존성이 필요하고 비전팀의 자세 추정
-  // 모듈과도 무관한 별개 기능이라, 시연 일정을 고려해 이번 배치에서는 넣지 않는다.
-  // 대신 스캐너 모달 안에서 바코드 코드를 직접 입력받아 barcode_code로 등록한다.
-  useEffect(() => {
-    if (!isScanning) return;
-    setScanProgress(0);
-    const interval = setInterval(() => {
-      setScanProgress((prev) => (prev >= 100 ? 0 : prev + 10));
-    }, 200);
-    return () => clearInterval(interval);
-  }, [isScanning]);
+  // 실제 카메라 기반 QR/바코드 스캔은 expo-camera 등 신규 네이티브 의존성이
+  // 필요하고 비전팀의 자세 추정 모듈과도 무관한 별개 기능이라 넣지 않는다.
+  // 모달 안에서 매칭 코드를 직접 입력받아 barcode_code로 등록한다.
 
   const handleBack = () => {
     navigation.goBack();
@@ -128,7 +117,7 @@ export default function AddSeniorScreen() {
     if (scanSubmitting) return;
     const trimmed = barcodeCode.trim();
     if (!trimmed) {
-      setScanError('연동 바코드 코드를 입력해 주세요.');
+      setScanError('매칭 코드를 입력해 주세요.');
       return;
     }
     registerSenior(
@@ -238,11 +227,11 @@ export default function AddSeniorScreen() {
             <View style={styles.methodBadge}>
               <Text style={styles.methodBadgeText}>2</Text>
             </View>
-            <Text style={styles.methodLabel}>바코드로 바로 등록하기</Text>
+            <Text style={styles.methodLabel}>코드로 바로 등록하기</Text>
           </View>
           <Text style={styles.methodDescription}>
-            어르신의 모바일 화면 &apos;내 개인정보&apos; 하단에 활성화된 연동 바코드를 스캔하거나,
-            바코드 아래의 코드를 직접 입력하여 등록합니다.
+            어르신의 &apos;내 개인정보&apos; 화면에 표시된 매칭 코드를 아래에 입력하여
+            등록합니다.
           </Text>
 
           <Pressable
@@ -253,10 +242,8 @@ export default function AddSeniorScreen() {
               <QrCode size={32} color={colors.primary} strokeWidth={2} />
             </View>
             <View style={styles.scanTextWrap}>
-              <Text style={styles.scanButtonTitle}>스캔 화면 열기</Text>
-              <Text style={styles.scanButtonSubtitle}>
-                바코드를 비추거나 코드를 직접 입력하세요
-              </Text>
+              <Text style={styles.scanButtonTitle}>코드 입력하기</Text>
+              <Text style={styles.scanButtonSubtitle}>매칭 코드를 입력하세요</Text>
             </View>
           </Pressable>
         </View>
@@ -270,35 +257,27 @@ export default function AddSeniorScreen() {
         </Text>
       </View>
 
-      {/* Scanner Modal — 레이저 애니메이션은 연출, 실제 등록은 코드 직접 입력 */}
+      {/* Scanner Modal — 카메라 연출 없이 코드를 직접 입력받는다 */}
       {isScanning ? (
         <View style={styles.scannerOverlay}>
-          <View style={styles.scannerHeader}>
-            <View style={styles.scannerHeaderLeft}>
-              <Scan size={18} color={colors.scoreGradientEnd} />
-              <Text style={styles.scannerHeaderText}>바코드 연동 등록</Text>
+          <View style={styles.scannerCard}>
+            <View style={styles.scannerCardHeader}>
+              <Text style={styles.scannerCardTitle}>코드로 등록</Text>
+              <Pressable
+                onPress={handleCloseScanner}
+                style={({ pressed }) => [
+                  styles.scannerCardCloseButton,
+                  pressed && styles.pressedOpacity,
+                ]}
+              >
+                <X size={18} color={colors.textSecondary} />
+              </Pressable>
             </View>
-            <Pressable
-              onPress={handleCloseScanner}
-              style={({ pressed }) => [styles.scannerCloseButton, pressed && styles.pressedOpacity]}
-            >
-              <X size={18} color={colors.white} />
-            </Pressable>
-          </View>
 
-          <View style={styles.scannerBody}>
             <Text style={styles.scannerHint}>
-              어르신 휴대폰 하단 개인정보에 표시된 연동 바코드를 카메라 박스 안에 맞추거나,
-              바코드 아래 코드를 아래 칸에 입력해 주세요
+              어르신 휴대폰 &apos;내 개인정보&apos; 화면에 표시된 매칭 코드를 아래에 입력해
+              주세요
             </Text>
-
-            <View style={styles.viewfinder}>
-              <View style={[styles.laserLine, { top: `${scanProgress}%` }]} />
-              <QrCode size={72} color="rgba(16, 185, 129, 0.4)" strokeWidth={1.5} />
-              <View style={styles.scanningBadge}>
-                <Text style={styles.scanningBadgeText}>바코드를 비춰 주세요</Text>
-              </View>
-            </View>
 
             <View style={styles.scannerForm}>
               <TextInput
@@ -307,7 +286,7 @@ export default function AddSeniorScreen() {
                   setBarcodeCode(text);
                   setScanError(null);
                 }}
-                placeholder="연동 바코드 코드 직접 입력"
+                placeholder="매칭 코드 직접 입력"
                 placeholderTextColor={colors.disabledText}
                 autoCapitalize="characters"
                 autoCorrect={false}
@@ -325,7 +304,7 @@ export default function AddSeniorScreen() {
                 ]}
               >
                 <Text style={styles.barcodeSubmitButtonText}>
-                  {scanSubmitting ? '등록 중...' : '이 바코드로 등록하기'}
+                  {scanSubmitting ? '등록 중...' : '이 코드로 등록하기'}
                 </Text>
               </Pressable>
 
@@ -576,82 +555,43 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: colors.overlay,
-  },
-  scannerHeader: {
-    padding: spacing.md + spacing.xs,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: colors.cameraViewport,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  scannerHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  scannerHeaderText: {
-    fontSize: guardianFontSizes.label,
-    fontWeight: fontWeights.extrabold,
-    color: colors.white,
-  },
-  scannerCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.cameraViewportDeep,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scannerBody: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing.lg,
   },
-  scannerHint: {
-    fontSize: guardianFontSizes.subtitle,
-    fontWeight: fontWeights.bold,
-    color: colors.border,
-    textAlign: 'center',
-    maxWidth: 280,
-    marginBottom: spacing.lg,
+  scannerCard: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
   },
-  viewfinder: {
-    width: 200,
-    height: 200,
-    borderWidth: 4,
-    borderColor: colors.scoreGradientEnd,
-    borderRadius: radius.lg + 4,
+  scannerCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  scannerCardTitle: {
+    fontSize: guardianFontSizes.label,
+    fontWeight: fontWeights.extrabold,
+    color: colors.text,
+  },
+  scannerCardCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.grayBadgeBackground,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(3, 7, 18, 0.8)',
-    overflow: 'hidden',
   },
-  laserLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 3,
-    backgroundColor: colors.scoreGradientEnd,
-  },
-  scanningBadge: {
-    position: 'absolute',
-    bottom: spacing.md,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.sm + spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  scanningBadgeText: {
-    fontSize: guardianFontSizes.small,
-    fontWeight: fontWeights.black,
-    color: colors.scoreGradientEnd,
+  scannerHint: {
+    fontSize: guardianFontSizes.badge,
+    fontWeight: fontWeights.bold,
+    color: colors.textSecondary,
+    marginTop: spacing.sm + spacing.xs,
   },
   scannerForm: {
     width: '100%',
-    maxWidth: 320,
     marginTop: spacing.lg,
     gap: spacing.sm,
   },
