@@ -154,7 +154,7 @@ export default function AddSeniorScreen() {
         </Pressable>
         <Text style={styles.title}>피보호자 추가 등록</Text>
         <Text style={styles.subtitle}>
-          조회 및 실시간 안전 모니터링을 연동할 어르신의 정보를 등록하세요.
+          조회 및 안전 모니터링을 연동할 어르신의 정보를 등록하세요.
         </Text>
       </View>
 
