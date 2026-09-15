@@ -366,7 +366,7 @@ silvervision/
 - 비밀번호 변경/재설정 API, 매핑 등록 전 시니어 검색 API
 - 관절별 편차 실측(`pose_feedback`) — 매처가 통과/실패만 반환해 관련 엔드포인트 휴면 (4.2절)
 - **무활동 자동 감지** — `activity_log`는 로그 수집만 하고, 이를 실제로 판정해 응급 이벤트를 자동 생성하는 로직은 없음(타입·라벨만 존재). 로그를 기록할 시니어 기기 쪽 코드 자체가 없어 이 파이프라인은 완전히 미연동 상태
-- **SOS 긴급 호출** — `EmergencyEvent.event_type='sos'`도 무활동과 같은 패턴: 보호자 표시 라벨("SOS 긴급 호출")과 데모 시드 데이터에만 존재하고, 시니어 앱에 SOS 버튼 자체가 없어 프론트가 생성하는 일이 없음. 현재 자동/수동으로 실제 생성되는 `event_type`은 낙상(`fall`) 하나뿐
+- **SOS 긴급 호출** — `EmergencyEvent.event_type='sos'`도 무활동과 같은 패턴: 보호자 표시 라벨("SOS 긴급 호출")만 존재하고, 시니어 앱에 SOS 버튼 자체가 없어 프론트가 생성하는 일이 없음. 현재 자동/수동으로 실제 생성되는 `event_type`은 낙상(`fall`) 하나뿐 — `seed_demo`의 데모 알림도 실기기 시연 시 혼동을 줄이려고 fall 2건만 넣는다(무활동/SOS는 데모에도 없음)
 
 **알려진 한계**
 
@@ -446,7 +446,7 @@ SOLAPI_SENDER_NUMBER=   # 솔라피에 사전 등록한 발신번호
 
 ```bash
 python manage.py migrate
-python manage.py seed_demo --with-alerts    # 데모 계정·운동 4종·응급 알림 4건 (DEBUG=True 전용)
+python manage.py seed_demo --with-alerts    # 데모 계정·운동 4종·응급 알림 2건 (DEBUG=True 전용)
 python manage.py runserver 0.0.0.0:8000     # API는 /api/v1/, admin은 /admin/
 ```
 
@@ -458,7 +458,7 @@ python manage.py runserver 0.0.0.0:8000     # API는 /api/v1/, admin은 /admin/
 | 보호자 계정 | `guardian1` / `guardian1234` |
 | 연동 | 위 두 계정이 서로 매핑된 상태 |
 | 운동 콘텐츠 | 4종(스트레칭·상체·무릎·균형, 각각 `pose_workout_key` 세팅) |
-| 응급 알림 | 4건 (`--with-alerts`를 줬을 때만) |
+| 응급 알림 | 2건, 낙상(`fall`)만 — 미종결 1건 + 종결 1건 (`--with-alerts`를 줬을 때만) |
 
 운동 콘텐츠만 필요하면 `python manage.py seed_exercises`.
 

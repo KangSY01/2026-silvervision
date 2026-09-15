@@ -9,7 +9,7 @@
   2. 보호자  guardian1 / guardian1234  (GuardianLoginScreen 기본 입력값과 일치)
   3. 둘의 연동(GuardianSeniorMap)
   4. 운동 4종 (seed_exercises 재사용)
-  5. 응급 알림 4건 - --with-alerts 를 준 경우에만
+  5. 응급 알림 2건 - --with-alerts 를 준 경우에만
 
 전부 update_or_create/get_or_create 기반이라 여러 번 돌려도 중복되지 않는다.
 비밀번호는 이미 있는 계정이면 덮어쓰지 않는다(직접 바꿔둔 값을 되돌리지 않기
@@ -49,12 +49,13 @@ GUARDIAN = {
 }
 
 # (몇 시간 전, event_type, detection_source, status)
-# 최근 2건이 보호자 홈 피드에 뜬다. 하나는 미종결(주황)·하나는 종결(초록)로
-# 잡아 두 표시를 모두 확인할 수 있게 한다.
+# fall 2건만 남긴다 - inactivity/sos는 실제 감지 파이프라인이 없어(활동 로그
+# 자동 판정 로직·SOS 버튼 둘 다 미구현, README 4.6절) 실기기 데모에 섞이면
+# "이것도 실제로 감지되는 기능"이라는 오해를 줄 수 있다. 두 건 다 보호자 홈
+# 피드(최근 2건 노출)에 뜨며, 하나는 미종결(주황)·하나는 종결(초록)로 잡아
+# 두 표시를 모두 확인할 수 있게 한다.
 ALERTS = [
     (2, 'fall', 'exercise:balance', 'notified'),
-    (26, 'inactivity', 'daily_activity_scan', 'resolved'),
-    (50, 'sos', 'sos_button', 'false_alarm'),
     (74, 'fall', 'exercise:knee', 'resolved'),
 ]
 
@@ -65,7 +66,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             '--with-alerts', action='store_true',
-            help='응급 알림 4건도 함께 생성한다(기본은 생성하지 않음).',
+            help='응급 알림 2건도 함께 생성한다(기본은 생성하지 않음).',
         )
         parser.add_argument(
             '--reset-password', action='store_true',
