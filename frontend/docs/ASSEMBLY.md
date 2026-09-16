@@ -41,9 +41,9 @@
 
 VideoTensor와 frontend 중 한쪽만 먼저 바뀐 상태를 발견했을 때(또는 VideoTensor를 독립적으로 작업하고 다시 합쳤을 때) 반영 순서:
 
-1. **`src/exercise` vs `src/pose/exercise`를 파일 단위로 diff**한다 — `constants.ts`(포즈 목록/관절 서브셋/홀드 시간/튜닝값), `reference-poses.ts`, `matcher.ts`, `pipeline.ts`, `index.ts` 순으로 구조가 1:1 대응해야 한다. `geometry.ts`는 지금까지 한 번도 갈라진 적 없음 — 바뀌었다면 실수일 가능성이 높으니 먼저 의도를 확인.
+1. **`src/exercise` vs `src/pose/exercise`를 파일 단위로 diff**한다 — `constants.ts`(포즈 목록/관절 서브셋/홀드 시간/튜닝 프로필 `buildExerciseTuning`), `reference-poses.ts`, `matcher.ts`, `pipeline.ts`, `index.ts` 순으로 구조가 1:1 대응해야 한다. frontend는 튜닝값을 프로필 객체로 파이프라인 생성자에 넘기는 구조라, VideoTensor가 아직 모듈 상수 방식이면 이 구조 차이부터 맞춘다. `src/fall`도 같은 방식(`FallTuning`을 `FallPipeline`/`FallDetector` 생성자로)이다. `geometry.ts`는 지금까지 한 번도 갈라진 적 없음 — 바뀌었다면 실수일 가능성이 높으니 먼저 의도를 확인.
 2. **`assets/poses/` 목록을 diff**한다 — 한쪽에만 있는 포즈 파일이 있으면 다른 쪽 `convert-pose-json.mjs`를 다시 돌려 채운다(둘 다 `output_new_exercises/`가 원본이므로 소스만 같으면 두 스크립트의 결과물은 바이트 단위로 같아야 한다).
 3. **사용 화면에서 API 시그니처 변경분을 반영**한다 — `ExercisePipeline` 생성자, `matchesPose` 인자, `ExerciseState`의 필드가 바뀌면 `src/app/index.tsx`(VideoTensor), `PoseSmokeTestScreen.tsx`/`ExerciseProgressScreen.tsx`(frontend) 전부 고쳐야 컴파일이 통과한다.
 4. **양쪽에서 `npx tsc --noEmit`**을 돌려 타입 정합성을 확인한다.
 5. **self-match 검증**(카메라 없이 로직만 확인): 각 포즈를 "그 자신의 라이브 프레임"으로 놓고 `computeJointAngles` → `matchesPose`에 넣으면 반드시 `true`가 나와야 한다. 마스킹 인덱스가 어긋나거나 `minVisibleJoints`가 `activeJoints.length`와 안 맞으면 여기서 걸린다. (이 검증용 스크립트는 커밋해두지 않았으니, 필요하면 `constants.ts`의 `WORKOUT_POSE_SEQUENCES`와 `matcher.ts`의 로직을 그대로 옮긴 1회성 Node 스크립트로 재작성한다.)
-6. 마지막으로 **실기기 빌드**(`npm run android`)로 카메라 매칭 체감을 확인한다 — 타입체크/self-match는 로직 정합성만 보장할 뿐, 실제 튜닝값(`ANGLE_TOLERANCE_DEG`/`MIN_VISIBILITY`/`GRACE_RATIO`)이 적당한지는 실기기에서만 판단 가능하다.
+6. 마지막으로 **실기기 빌드**(`npm run android`)로 카메라 매칭 체감을 확인한다 — 타입체크/self-match는 로직 정합성만 보장할 뿐, 실제 튜닝값(`ExerciseTuning`/`FallTuning` 프로필의 `angleToleranceDeg`/`graceRatio`/`fallThreshold` 등, `MIN_VISIBILITY`)이 적당한지는 실기기에서만 판단 가능하다.

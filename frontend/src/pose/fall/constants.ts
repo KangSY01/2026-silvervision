@@ -70,6 +70,22 @@ export const N_FEATURES = featureNames().length; // 53
 //   재현율 0.968, 시간당 오경보 7.31회 (README 11장, 모델 선택 임계값).
 //   오경보를 더 줄이려면 임계값↑/연속횟수↑ (재현율과 트레이드오프).
 // ============================================================
-export const FALL_THRESHOLD = 0.95; // 이 확률 이상을 '낙상 윈도우'로 본다 (model_v3 선택 임계값)
-export const CONSECUTIVE_WINDOWS = 2; // 연속 N회 충족 시 낙상 확정 (오경보 억제)
-export const RECOVER_WINDOWS = 3; // fallen 상태에서 연속 N회 저확률이면 idle 복귀(히스테리시스)
+export type FallTuning = {
+  fallThreshold: number; // 이 확률 이상을 '낙상 윈도우'로 본다
+  consecutiveWindows: number; // 연속 N회 충족 시 낙상 확정 (오경보 억제)
+  recoverWindows: number; // fallen 상태에서 연속 N회 저확률이면 idle 복귀(히스테리시스)
+};
+
+/** 원래 값 프로필 — model_v3 선택 임계값 그대로. 프로필을 따로 지정하지 않을 때의 기본값. */
+export const STRICT_FALL_TUNING: FallTuning = {
+  fallThreshold: 0.95,
+  consecutiveWindows: 2,
+  recoverWindows: 3,
+};
+
+/** 넉넉한 프로필 — 임계값을 낮춰 더 잘 잡히게 한다(오경보 증가 감수). */
+export const RELAXED_FALL_TUNING: FallTuning = {
+  fallThreshold: 0.9,
+  consecutiveWindows: 2,
+  recoverWindows: 3,
+};

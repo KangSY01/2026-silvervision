@@ -41,13 +41,6 @@ export type JointAngleName = (typeof JOINT_ANGLE_DEFS)[number]['name'];
 // 관절이 살짝만 가려져도 통째로 빠지는 일이 잦아 더 낮춰서 관대하게 판정한다.
 export const MIN_VISIBILITY = 0.2;
 
-// ⚠️ 실기기 튜닝 대상 — 아래 값은 시작값이며 실제 사용감 보고 조정할 것.
-// 관절 각도 하나당 허용 오차(도). 이 이내면 그 관절은 "일치"로 본다.
-export const ANGLE_TOLERANCE_DEG = 35;
-// 매칭이 잠깐 끊겨도(노이즈 한두 프레임) 바로 리셋하지 않고 봐주는 유예 비율.
-// 유예 시간(ms) = 해당 단계 holdMs * 이 비율 — 홀드가 길수록 유예도 비례해서 늘어난다.
-export const GRACE_RATIO = 1 / 5;
-
 // ============================================================
 // 신체 부위 그룹 — 좌우 미표기 관절 이름은 항상 양쪽(l_/r_) 다 포함한다.
 // ============================================================
@@ -56,6 +49,8 @@ const KNEE: JointAngleName[] = ['l_knee', 'r_knee'];
 const SHOULDER: JointAngleName[] = ['l_shoulder', 'r_shoulder'];
 const ELBOW: JointAngleName[] = ['l_elbow', 'r_elbow'];
 const FULL_BODY: JointAngleName[] = JOINT_ANGLE_DEFS.map((d) => d.name);
+// 하체 운동(무릎/균형)용 — 팔꿈치는 자세와 무관하게 흔들려 매칭만 방해하므로 뺀다.
+const BODY_WITHOUT_ELBOW: JointAngleName[] = [...HIP, ...KNEE, ...SHOULDER];
 
 // ============================================================
 // 포즈(운동 단계) 이름 — frontend/assets/poses/*.json 파일명과 1:1 대응.
@@ -96,7 +91,31 @@ const PREP_HOLD_MS = 2000;
 const STRETCHING_UPPER_BODY_HOLD_MS = 8000;
 const KNEE_BALANCE_HOLD_MS = 5000;
 
-export const WORKOUT_POSE_SEQUENCES: Record<WorkoutKey, PoseStepDef[]> = {
+// ============================================================
+// 튜닝 프로필 — 판정을 얼마나 엄격하게 할지 한 묶음으로 정의한다.
+// ExercisePipeline 생성 시 넘기며, 앱 설정(AppModeContext)의 토글 조합으로 조립한다.
+// ============================================================
+export type ExerciseTuning = {
+  // 관절 각도 하나당 허용 오차(도). 이 이내면 그 관절은 "일치"로 본다.
+  angleToleranceDeg: number;
+  // 매칭이 잠깐 끊겨도(노이즈 한두 프레임) 바로 리셋하지 않고 봐주는 유예 비율.
+  // 유예 시간(ms) = 해당 단계 holdMs * 이 비율 — 홀드가 길수록 유예도 비례해서 늘어난다.
+  graceRatio: number;
+  sequences: Record<WorkoutKey, PoseStepDef[]>;
+};
+
+export type ExerciseTuningOptions = {
+  // 모든 단계 유지 시간을 FAST_HOLD_MS로 통일한다(시연용 — 운동 한 세트가 금방 끝난다).
+  fastHold: boolean;
+  // 유예 비율을 늘리고, 자세와 무관하게 흔들리는 관절(팔 운동의 엉덩이, 하체 운동의
+  // 팔꿈치)을 판정에서 뺀다.
+  relaxed: boolean;
+};
+
+const FAST_HOLD_MS = 2000;
+
+/** 원래 시퀀스 — 기준 포즈 사진 기준의 관절 서브셋과 운동별 유지 시간. */
+const STRICT_SEQUENCES: Record<WorkoutKey, PoseStepDef[]> = {
   stretching: [
     { poseName: 'stretching1', activeJoints: [...HIP, ...KNEE], holdMs: PREP_HOLD_MS },
     { poseName: 'stretching2', activeJoints: [...HIP, ...SHOULDER, ...ELBOW], holdMs: STRETCHING_UPPER_BODY_HOLD_MS },
@@ -122,3 +141,63 @@ export const WORKOUT_POSE_SEQUENCES: Record<WorkoutKey, PoseStepDef[]> = {
     { poseName: 'balance_pose5', activeJoints: FULL_BODY, holdMs: KNEE_BALANCE_HOLD_MS },
   ],
 };
+
+/** 넉넉한 관절 서브셋 — 유지 시간은 STRICT와 같고 activeJoints만 줄인다. */
+const RELAXED_SEQUENCES: Record<WorkoutKey, PoseStepDef[]> = {
+  stretching: [
+    { poseName: 'stretching1', activeJoints: [...HIP, ...KNEE], holdMs: PREP_HOLD_MS },
+    { poseName: 'stretching2', activeJoints: [...SHOULDER, ...ELBOW], holdMs: STRETCHING_UPPER_BODY_HOLD_MS },
+    { poseName: 'stretching3', activeJoints: [...SHOULDER, ...ELBOW], holdMs: STRETCHING_UPPER_BODY_HOLD_MS },
+  ],
+  upper_body: [
+    { poseName: 'upper_body1', activeJoints: [...HIP, ...KNEE, ...SHOULDER], holdMs: PREP_HOLD_MS },
+    { poseName: 'upper_body2', activeJoints: [...ELBOW, ...SHOULDER], holdMs: STRETCHING_UPPER_BODY_HOLD_MS },
+    { poseName: 'upper_body3', activeJoints: [...ELBOW, ...SHOULDER], holdMs: STRETCHING_UPPER_BODY_HOLD_MS },
+    { poseName: 'upper_body4', activeJoints: [...ELBOW, ...SHOULDER], holdMs: STRETCHING_UPPER_BODY_HOLD_MS },
+    { poseName: 'upper_body5', activeJoints: [...ELBOW, ...SHOULDER], holdMs: STRETCHING_UPPER_BODY_HOLD_MS },
+  ],
+  knee: [
+    { poseName: 'knee1', activeJoints: FULL_BODY, holdMs: PREP_HOLD_MS },
+    { poseName: 'knee2', activeJoints: BODY_WITHOUT_ELBOW, holdMs: KNEE_BALANCE_HOLD_MS },
+    { poseName: 'knee3', activeJoints: BODY_WITHOUT_ELBOW, holdMs: KNEE_BALANCE_HOLD_MS },
+  ],
+  balance: [
+    { poseName: 'balance_pose1', activeJoints: BODY_WITHOUT_ELBOW, holdMs: PREP_HOLD_MS },
+    { poseName: 'balance_pose2', activeJoints: BODY_WITHOUT_ELBOW, holdMs: KNEE_BALANCE_HOLD_MS },
+    { poseName: 'balance_pose3', activeJoints: BODY_WITHOUT_ELBOW, holdMs: KNEE_BALANCE_HOLD_MS },
+    { poseName: 'balance_pose4', activeJoints: BODY_WITHOUT_ELBOW, holdMs: KNEE_BALANCE_HOLD_MS },
+    { poseName: 'balance_pose5', activeJoints: BODY_WITHOUT_ELBOW, holdMs: KNEE_BALANCE_HOLD_MS },
+  ],
+};
+
+function withHoldMs(
+  sequences: Record<WorkoutKey, PoseStepDef[]>,
+  holdMs: number,
+): Record<WorkoutKey, PoseStepDef[]> {
+  return Object.fromEntries(
+    Object.entries(sequences).map(([key, steps]) => [
+      key,
+      steps.map((step) => ({ ...step, holdMs })),
+    ]),
+  ) as Record<WorkoutKey, PoseStepDef[]>;
+}
+
+/** 토글 조합으로 튜닝 프로필을 조립한다. 둘 다 false면 원래 값 그대로다. */
+export function buildExerciseTuning(options: ExerciseTuningOptions): ExerciseTuning {
+  const base = options.relaxed ? RELAXED_SEQUENCES : STRICT_SEQUENCES;
+  return {
+    angleToleranceDeg: 35,
+    graceRatio: options.relaxed ? 1 / 2 : 1 / 5,
+    sequences: options.fastHold ? withHoldMs(base, FAST_HOLD_MS) : base,
+  };
+}
+
+/** 원래 값 프로필 — 프로필을 따로 지정하지 않을 때의 기본값. */
+export const STRICT_EXERCISE_TUNING: ExerciseTuning = buildExerciseTuning({
+  fastHold: false,
+  relaxed: false,
+});
+
+// 백엔드 Exercise.pose_workout_key 검증 등 "어떤 워크아웃이 있는가"만 필요한 곳은
+// 이 시퀀스의 키만 참조한다.
+export const WORKOUT_POSE_SEQUENCES: Record<WorkoutKey, PoseStepDef[]> = STRICT_SEQUENCES;

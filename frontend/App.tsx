@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AppModeProvider } from './src/context/AppModeContext';
 import { AppStateProvider } from './src/context/AppStateContext';
 import { syncScheduledReminder } from './src/notifications/exerciseReminder';
 import { RootStackParamList } from './src/navigation/types';
@@ -40,29 +41,31 @@ export default function App() {
     <SafeAreaProvider>
       <View style={styles.webContainer}>
         <AppStateProvider>
-          <NavigationContainer>
-            <Stack.Navigator initialRouteName="Entry" screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="Entry" component={EntryScreen} />
-              <Stack.Screen name="Login" component={LoginScreen} />
-              <Stack.Screen name="Signup" component={SignupScreen} />
-              <Stack.Screen name="SeniorHome" component={SeniorHomeScreen} />
-              <Stack.Screen name="ExerciseSelect" component={ExerciseSelectScreen} />
-              <Stack.Screen name="ExerciseProgress" component={ExerciseProgressScreen} />
-              <Stack.Screen name="ExerciseFeedback" component={ExerciseFeedbackScreen} />
-              <Stack.Screen name="Profile" component={ProfileScreen} />
-              <Stack.Screen name="AbilityHistory" component={AbilityHistoryScreen} />
-              <Stack.Screen name="GuardianLogin" component={GuardianLoginScreen} />
-              <Stack.Screen name="GuardianSignup" component={GuardianSignupScreen} />
-              <Stack.Screen name="GuardianHome" component={GuardianHomeScreen} />
-              <Stack.Screen name="GuardianActivityList" component={GuardianActivityListScreen} />
-              <Stack.Screen name="AddSenior" component={AddSeniorScreen} />
-              <Stack.Screen name="SeniorDetail" component={SeniorDetailScreen} />
-              <Stack.Screen name="GuardianProfile" component={GuardianProfileScreen} />
-              <Stack.Screen name="AlertHistory" component={AlertHistoryScreen} />
-              <Stack.Screen name="AlertDetail" component={AlertDetailScreen} />
-              <Stack.Screen name="PoseSmokeTest" component={PoseSmokeTestScreen} />
-            </Stack.Navigator>
-          </NavigationContainer>
+          <AppModeProvider>
+            <NavigationContainer>
+              <Stack.Navigator initialRouteName="Entry" screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="Entry" component={EntryScreen} />
+                <Stack.Screen name="Login" component={LoginScreen} />
+                <Stack.Screen name="Signup" component={SignupScreen} />
+                <Stack.Screen name="SeniorHome" component={SeniorHomeScreen} />
+                <Stack.Screen name="ExerciseSelect" component={ExerciseSelectScreen} />
+                <Stack.Screen name="ExerciseProgress" component={ExerciseProgressScreen} />
+                <Stack.Screen name="ExerciseFeedback" component={ExerciseFeedbackScreen} />
+                <Stack.Screen name="Profile" component={ProfileScreen} />
+                <Stack.Screen name="AbilityHistory" component={AbilityHistoryScreen} />
+                <Stack.Screen name="GuardianLogin" component={GuardianLoginScreen} />
+                <Stack.Screen name="GuardianSignup" component={GuardianSignupScreen} />
+                <Stack.Screen name="GuardianHome" component={GuardianHomeScreen} />
+                <Stack.Screen name="GuardianActivityList" component={GuardianActivityListScreen} />
+                <Stack.Screen name="AddSenior" component={AddSeniorScreen} />
+                <Stack.Screen name="SeniorDetail" component={SeniorDetailScreen} />
+                <Stack.Screen name="GuardianProfile" component={GuardianProfileScreen} />
+                <Stack.Screen name="AlertHistory" component={AlertHistoryScreen} />
+                <Stack.Screen name="AlertDetail" component={AlertDetailScreen} />
+                <Stack.Screen name="PoseSmokeTest" component={PoseSmokeTestScreen} />
+              </Stack.Navigator>
+            </NavigationContainer>
+          </AppModeProvider>
         </AppStateProvider>
         <StatusBar style="auto" />
       </View>

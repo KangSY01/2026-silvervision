@@ -8,7 +8,14 @@
 // 라이브용으로 옮긴 것. 특징은 연속 롤링 grid 버퍼 위에서 계산해 윈도우 경계의
 // 속도가 이전 grid 프레임을 참조하도록 한다(학습과 동일).
 // ============================================================
-import { DT_MS, N_FEATURES, STRIDE_FRAMES, WINDOW_FRAMES } from './constants';
+import {
+  DT_MS,
+  N_FEATURES,
+  STRICT_FALL_TUNING,
+  STRIDE_FRAMES,
+  WINDOW_FRAMES,
+  type FallTuning,
+} from './constants';
 import { FallDetector, type DecisionState } from './decision';
 import { buildFeatures } from './features';
 import { resampleToGrid } from './resampler';
@@ -27,9 +34,14 @@ export class FallPipeline {
   private originMs: number | null = null;
   private lastTs = -Infinity; // 중복 결과 필터
   private lastInferTs = -Infinity; // stride 게이트
-  private readonly detector = new FallDetector();
+  private readonly detector: FallDetector;
 
-  constructor(private readonly runInference: RunInference) {}
+  constructor(
+    private readonly runInference: RunInference,
+    tuning: FallTuning = STRICT_FALL_TUNING,
+  ) {
+    this.detector = new FallDetector(tuning);
+  }
 
   reset(): void {
     this.obs = [];

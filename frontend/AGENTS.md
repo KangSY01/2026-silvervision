@@ -41,7 +41,8 @@ frontend/
     navigation/types.ts          # RootStackParamList — 화면별 params 타입 정의 (8장 참고)
     api/client.ts                # 공통 API 클라이언트 (fetch 래퍼, JWT 저장/첨부, ApiError, 응답 타입)
     context/AppStateContext.tsx  # userProfile, fruitsCollected 등 전역 상태 공유 (8장 참고)
-    components/TabScreenLayout.tsx  # 홈/운동하기/개인정보 공통 헤더 + 하단 탭바 레이아웃
+    context/AppModeContext.tsx   # 특수환경 설정 4개 토글 → 포즈 튜닝 프로필·디버그 표시 여부 (9장 참고)
+    components/TabScreenLayout.tsx  # 홈/운동하기/개인정보 공통 헤더 + 하단 탭바 레이아웃 (개인정보 탭 길게 누름 → SpecialModeDialog)
     theme/theme.ts                # colors / fontSizes / fontWeights / spacing / radius / MIN_TOUCH_TARGET 토큰
     types/index.ts                # UserProfile, ActivityLevel, Workout, PoseWorkoutKey, ExerciseResult 등 공용 타입
     pose/                         # 카메라 포즈 기능 로직 (9장) — exercise/(운동 매칭)·fall/(낙상 감지)·screenMapping.ts
@@ -197,5 +198,9 @@ Entry (진입)
 - **아직 실제 값이 아닌 것**: `PoseFeedback.deviation`(관절별 편차)은 placeholder다. `matcher.ts`의 `matchesPose()`가 boolean만 반환해 각도 차이를 노출하지 않기 때문이며, 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값이다. matcher가 각도 차이를 함께 반환하도록 확장돼야 갈라진다(`ExerciseFeedbackScreen`의 `TODO(vision)` 참고).
 
 **화면 연결**: `ExerciseProgressScreen`(제품 플로우, `workout.poseWorkoutKey`로 워크아웃 결정)과 `PoseSmokeTestScreen`(개발 전용, `stretching` 고정, `EntryScreen`의 `__DEV__` 링크로 진입) 둘 다 `ExercisePipeline`과 `FallPipeline`을 함께 사용한다 — 한 프레임이 운동 매칭과 낙상 감지 양쪽에 동시에 흘러간다.
+
+**튜닝 프로필과 특수환경 설정**: 판정 임계값은 상수가 아니라 프로필 객체다 — `src/pose/exercise/constants.ts`의 `ExerciseTuning`(`angleToleranceDeg`/`graceRatio`/`sequences`)은 `buildExerciseTuning({ fastHold, relaxed })`로 조립하고, `src/pose/fall/constants.ts`의 `FallTuning`(`fallThreshold`/`consecutiveWindows`/`recoverWindows`)은 `STRICT_FALL_TUNING`(0.95)/`RELAXED_FALL_TUNING`(0.90) 둘 중 하나다. 각각 `ExercisePipeline`/`FallPipeline` 생성자로 넘긴다(기본값은 원래 값). 어느 값을 쓸지는 `src/context/AppModeContext.tsx`의 특수환경 설정 4개 토글이 정한다: 빠른 운동(`fastHold`, 모든 자세 2초) / 넉넉한 운동 기준(`relaxedExercise`, 유예 1/5→1/2 + 스트레칭·상체에서 엉덩이 제외, 무릎·균형에서 팔꿈치 제외) / 넉넉한 낙상 기준(`relaxedFall`) / 디버깅 데이터 표기(`showDebug`). 전부 OFF가 제품 기본이다. 설정은 `TabScreenLayout`의 개인정보 탭을 6초 길게 눌러 여는 `SpecialModeDialog`(암호 `silvervision`, 보안 장치가 아니라 오조작 방지용)에서 토글하고 `AsyncStorage`에 JSON으로 저장되며, 하나라도 켜져 있으면 헤더 pill에 "특수환경 N개"로 표시된다.
+
+**디버그 표시**: `ExerciseState`에 `liveAngles`/`refAngles`(`JOINT_ANGLE_DEFS` 순서의 8개 관절 각도, 표시 전용)와 `angleToleranceDeg`가 실려 나오고, `src/components/JointAngleDebugOverlay.tsx`가 이를 관절 | 현재 | 기준 | 차이 | 판정 표로 카메라 위에 그린다. `ExerciseProgressScreen`은 `showDebug`가 켜졌을 때만 이 표와 33개 landmark 점, 건너뛰기 버튼을 그리고, `PoseSmokeTestScreen`은 항상 표시한다. 낙상 확률 배지와 우하단 목표 자세 카드(`PoseTargetThumbnail`)는 설정과 무관하게 항상 표시된다.
 
 **주의**: `src/pose/exercise`·`src/pose/fall`을 수정할 때는 `VideoTensor` 쪽 원본과 구조가 어긋나지 않는지 [docs/ASSEMBLY.md](docs/ASSEMBLY.md)의 동기화 체크리스트로 확인한다.

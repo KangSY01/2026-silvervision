@@ -1,8 +1,10 @@
 import { useNavigation } from '@react-navigation/native';
 import { Dumbbell, Heart, Home, User } from 'lucide-react-native';
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAppMode } from '../context/AppModeContext';
+import SpecialModeDialog, { SPECIAL_MODE_LONG_PRESS_MS } from './SpecialModeDialog';
 import {
   colors,
   fontSizes,
@@ -21,6 +23,10 @@ interface TabScreenLayoutProps {
 
 export default function TabScreenLayout({ activeTab, children }: TabScreenLayoutProps) {
   const navigation = useNavigation();
+  const { enabledCount } = useAppMode();
+  // 개인정보 탭 길게 누름(SPECIAL_MODE_LONG_PRESS_MS)으로 여는 특수환경 창.
+  // Pressable은 onLongPress가 발화하면 onPress를 부르지 않으므로 화면 이동은 일어나지 않는다.
+  const [specialModeVisible, setSpecialModeVisible] = useState(false);
 
   const handleGoHome = () => {
     navigation.navigate('SeniorHome');
@@ -45,9 +51,13 @@ export default function TabScreenLayout({ activeTab, children }: TabScreenLayout
           <Text style={styles.wordmarkText}>실버비전</Text>
         </Pressable>
 
-        <View style={styles.statusPill}>
-          <View style={styles.statusDot} />
-          <Text style={styles.statusPillText}>시니어 전용</Text>
+        {/* 특수환경 설정이 하나라도 켜져 있으면 "시니어 전용" 대신 개수를 표시해
+            시연 후 되돌리는 것을 잊지 않게 한다. */}
+        <View style={[styles.statusPill, enabledCount > 0 && styles.statusPillMode]}>
+          <View style={[styles.statusDot, enabledCount > 0 && styles.statusDotMode]} />
+          <Text style={[styles.statusPillText, enabledCount > 0 && styles.statusPillTextMode]}>
+            {enabledCount > 0 ? `특수환경 ${enabledCount}개` : '시니어 전용'}
+          </Text>
         </View>
       </View>
 
@@ -83,6 +93,8 @@ export default function TabScreenLayout({ activeTab, children }: TabScreenLayout
 
         <Pressable
           onPress={handleGoProfile}
+          onLongPress={() => setSpecialModeVisible(true)}
+          delayLongPress={SPECIAL_MODE_LONG_PRESS_MS}
           style={({ pressed }) => [styles.tabButton, pressed && styles.pressedOpacity]}
         >
           <User
@@ -95,6 +107,11 @@ export default function TabScreenLayout({ activeTab, children }: TabScreenLayout
           </Text>
         </Pressable>
       </View>
+
+      <SpecialModeDialog
+        visible={specialModeVisible}
+        onClose={() => setSpecialModeVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -155,6 +172,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: fontWeights.black,
     color: colors.primary,
+  },
+  statusPillMode: {
+    backgroundColor: colors.warningBackground,
+    borderColor: colors.warningBorder,
+  },
+  statusDotMode: {
+    backgroundColor: colors.white,
+  },
+  statusPillTextMode: {
+    color: colors.white,
   },
   content: {
     flex: 1,

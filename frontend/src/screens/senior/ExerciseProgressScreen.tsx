@@ -32,7 +32,10 @@ import {
   getSession,
 } from '../../api/client';
 import EmergencyCheckOverlay from '../../components/EmergencyCheckOverlay';
+import JointAngleDebugOverlay from '../../components/JointAngleDebugOverlay';
 import PoseGuideSilhouette from '../../components/PoseGuideSilhouette';
+import PoseTargetThumbnail from '../../components/PoseTargetThumbnail';
+import { useAppMode } from '../../context/AppModeContext';
 import { RootStackParamList } from '../../navigation/types';
 import {
   colors,
@@ -48,6 +51,13 @@ import { mapNormalizedToScreen, type Layout } from '@/pose/screenMapping';
 
 const NUM_LANDMARKS = 33;
 const TARGET_FPS = 10;
+
+// FallDetector 단계 → 배지 문구. Record로 두어 FallPhase가 늘면 컴파일 타임에 드러난다.
+const FALL_PHASE_LABELS: Record<FallPhase, string> = {
+  idle: '정상',
+  candidate: '의심',
+  fallen: '낙상 감지',
+};
 const SMOOTHING_WINDOW = 3;
 const DISPLAY_UPDATE_INTERVAL_MS = 150;
 
@@ -215,14 +225,27 @@ export default function ExerciseProgressScreen() {
 
   const worldRawFramesRef = useRef<Landmark[][]>([]);
   const fallPipelineRef = useRef<FallPipeline | null>(null);
-  const exercisePipelineRef = useRef(new ExercisePipeline(workout.poseWorkoutKey));
+  // 특수환경 설정(AppModeContext)이 정한 튜닝 프로필. 운동 파이프라인은 마운트 시점의
+  // 프로필로 한 번 만들고, 낙상 파이프라인은 모델 로드 effect에서 프로필과 함께 만든다.
+  const { exerciseTuning, fallTuning, showDebug } = useAppMode();
+  const [exercisePipeline] = useState(
+    () => new ExercisePipeline(workout.poseWorkoutKey, exerciseTuning),
+  );
   const fallAlertSentRef = useRef(false);
 
   const [fallPhase, setFallPhase] = useState<FallPhase>('idle');
-  const [fallProb, setFallProb] = useState(0);
+  // 마지막 추론의 낙상 확률. 모델이 3초치 프레임을 모으기 전까지는 추론이 없어
+  // null로 두고, 화면에는 값 대신 "준비 중"을 보여준다(0.000으로 오해하지 않게).
+  const [fallProb, setFallProb] = useState<number | null>(null);
   const [exerciseStatus, setExerciseStatus] = useState<ExerciseStatus>('idle');
   const [exerciseStepIndex, setExerciseStepIndex] = useState(0);
   const [exerciseHoldElapsedMs, setExerciseHoldElapsedMs] = useState(0);
+  // 디버깅 데이터 표기(showDebug) 시 관절 각도 표(JointAngleDebugOverlay)용. 홀드 시간과
+  // 같은 주기(DISPLAY_UPDATE_INTERVAL_MS)로만 갱신해 10fps 프레임마다 리렌더하지 않는다.
+  const [debugAngles, setDebugAngles] = useState<{
+    live: (number | null)[] | null;
+    ref: (number | null)[] | null;
+  }>({ live: null, ref: null });
   // 낙상 확정 시 POST /emergency/ 로 생성된 이벤트 id. 값이 있으면 1차 확인
   // 오버레이(EmergencyCheckOverlay)를 띄운다.
   const [emergencyEventId, setEmergencyEventId] = useState<number | null>(null);
@@ -231,7 +254,7 @@ export default function ExerciseProgressScreen() {
   const lastFallProbUpdateRef = useRef(0);
 
   useEffect(() => {
-    exercisePipelineRef.current.start();
+    exercisePipeline.start();
     setExerciseStatus('running');
   }, []);
 
@@ -250,11 +273,11 @@ export default function ExerciseProgressScreen() {
       fallPipelineRef.current = new FallPipeline((win) => {
         const outputs = model.runSync([win.buffer as ArrayBuffer]);
         return new Float32Array(outputs[0] as ArrayBuffer)[0];
-      });
+      }, fallTuning);
     } else {
       fallPipelineRef.current = null;
     }
-  }, [tflite]);
+  }, [tflite, fallTuning]);
 
   const isActive = isFocused && appState === 'active';
 
@@ -295,7 +318,7 @@ export default function ExerciseProgressScreen() {
   };
 
   const handleFinish = useCallback(() => {
-    const state = exercisePipelineRef.current.getState();
+    const state = exercisePipeline.getState();
     // 시퀀스를 끝까지 마치면 pipeline이 stepIndex를 steps.length까지 올리고
     // status를 'complete'로 바꾸므로 completedSteps/totalSteps가 100%가 된다.
     // 중간에 "완료"를 누르면 그때까지 통과한 단계 수만 집계된다.
@@ -329,7 +352,7 @@ export default function ExerciseProgressScreen() {
       const detected = landmarks.length === NUM_LANDMARKS;
 
       const smoothedWorldLandmarks = smoothLandmarks(worldLandmarks, worldRawFramesRef);
-      const exerciseResult = exercisePipelineRef.current.onFrame(
+      const exerciseResult = exercisePipeline.onFrame(
         smoothedWorldLandmarks.length === NUM_LANDMARKS ? smoothedWorldLandmarks : null,
         now,
       );
@@ -338,6 +361,9 @@ export default function ExerciseProgressScreen() {
       if (now - lastExerciseHoldUpdateRef.current >= DISPLAY_UPDATE_INTERVAL_MS) {
         lastExerciseHoldUpdateRef.current = now;
         setExerciseHoldElapsedMs(exerciseResult.holdElapsedMs);
+        if (showDebug) {
+          setDebugAngles({ live: exerciseResult.liveAngles, ref: exerciseResult.refAngles });
+        }
       }
 
       const pipeline = fallPipelineRef.current;
@@ -356,7 +382,7 @@ export default function ExerciseProgressScreen() {
         setFallProb(result.prob);
       }
     },
-    [landmarksShared, smoothLandmarks],
+    [landmarksShared, smoothLandmarks, exercisePipeline, showDebug],
   );
 
   // 낙상 확정(phase === 'fallen') 시 응급 이벤트를 1회만 생성한다.
@@ -428,7 +454,15 @@ export default function ExerciseProgressScreen() {
   }, [exerciseStatus]);
 
   // 운동마다 스텝 수/홀드 시간이 다르므로(WORKOUT_POSE_SEQUENCES), 파이프라인 인스턴스에서 직접 조회한다.
-  const { totalSteps, holdMs, targetPoseName } = exercisePipelineRef.current.getState();
+  const { totalSteps, holdMs, targetPoseName, angleToleranceDeg } = exercisePipeline.getState();
+
+  // 낙상 확률 배지 문구. 모델 로딩 → 첫 추론(약 3초) → 이후 300ms마다 갱신.
+  const fallProbText =
+    tflite.state !== 'loaded'
+      ? '낙상 감지 준비 중…'
+      : fallProb == null
+        ? '낙상 감지 시작 중…'
+        : `낙상 확률 ${(fallProb * 100).toFixed(0)}% · ${FALL_PHASE_LABELS[fallPhase]}`;
 
   // 다음 자세로 넘어가기까지 남은 시간(초, 소수점 1자리). 아직 자세를 맞추기 전이면
   // 현재 단계가 채워야 할 전체 홀드 시간(holdMs)을 그대로 보여준다.
@@ -489,17 +523,21 @@ export default function ExerciseProgressScreen() {
           mirror={device?.position === 'front'}
         />
 
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          {Array.from({ length: NUM_LANDMARKS }).map((_, i) => (
-            <PoseDot
-              key={i}
-              index={i}
-              landmarksShared={landmarksShared}
-              layoutShared={layoutShared}
-              mirror={device?.position === 'front'}
-            />
-          ))}
-        </View>
+        {/* 33개 landmark 점 (디버깅 데이터 표기 시에만 노출). 판정과 무관한 표시 전용이며,
+            실루엣 가이드는 landmarksShared를 직접 읽으므로 점을 숨겨도 계속 동작한다. */}
+        {showDebug && (
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            {Array.from({ length: NUM_LANDMARKS }).map((_, i) => (
+              <PoseDot
+                key={i}
+                index={i}
+                landmarksShared={landmarksShared}
+                layoutShared={layoutShared}
+                mirror={device?.position === 'front'}
+              />
+            ))}
+          </View>
+        )}
 
         <View style={styles.scanFrame} pointerEvents="none" />
         <View style={[styles.corner, styles.cornerTL]} />
@@ -512,13 +550,29 @@ export default function ExerciseProgressScreen() {
           <Text style={styles.holdBadgeText}>{holdProgressText}</Text>
         </View>
 
-        {/* 디버깅용 낙상 확률 표기 (개발 빌드에서만 노출) */}
-        {__DEV__ && (
-          <View pointerEvents="none" style={styles.debugBadge}>
-            <Text style={styles.debugBadgeText}>
-              [DEV] 낙상 확률: {fallProb.toFixed(3)} ({fallPhase})
-            </Text>
-          </View>
+        {/* 현재 낙상 확률. 의심(candidate) 단계부터 색을 바꿔 눈에 띄게 한다. */}
+        <View pointerEvents="none" style={styles.fallProbBadge}>
+          <Text
+            style={[
+              styles.fallProbBadgeText,
+              fallPhase === 'candidate' && styles.fallProbBadgeCandidate,
+              fallPhase === 'fallen' && styles.fallProbBadgeFallen,
+            ]}
+          >
+            {fallProbText}
+          </Text>
+        </View>
+
+        {/* 우하단 고정 목표 자세 미리보기 (검은 실루엣) */}
+        <PoseTargetThumbnail poseName={targetPoseName} />
+
+        {/* 8개 관절 현재/기준 각도 표 (디버깅 데이터 표기 시에만 노출) */}
+        {showDebug && (
+          <JointAngleDebugOverlay
+            liveAngles={debugAngles.live}
+            refAngles={debugAngles.ref}
+            toleranceDeg={angleToleranceDeg}
+          />
         )}
 
         {/* 낙상 감지 시 당사자(시니어)에게도 즉시 표시 — 큰 움직임이 다시 감지되면 자동으로 사라진다. */}
@@ -555,15 +609,15 @@ export default function ExerciseProgressScreen() {
           </View>
         </View>
 
-        {/* 개발 빌드 전용 건너뛰기. 카메라 앞에서 실제로 동작을 다 하지 않고도
-            결과 화면을 열어볼 수 있어야 해서 남기지만, 릴리즈에서는 숨긴다 -
+        {/* 개발 빌드·디버깅 데이터 표기 전용 건너뛰기. 카메라 앞에서 실제로 동작을 다 하지
+            않고도 결과 화면을 열어볼 수 있어야 해서 남기지만, 그 외 릴리즈에서는 숨긴다 -
             이 버튼으로 나가면 completion_rate가 0으로라도 채워져 백엔드가
             "완료 세션"으로 집계하고(gamification._completed_sessions는
             completion_rate is not null 기준) 열매까지 지급되기 때문이다.
             정상 경로는 시퀀스를 끝까지 마쳐 자동 이동하는 것이고, 중도 포기는
             X 버튼(handleExit)이다 - 그쪽은 completion_rate를 채우지 않아
             미완료로 남는다. */}
-        {__DEV__ && (
+        {(__DEV__ || showDebug) && (
           <Pressable
             onPress={handleFinish}
             style={({ pressed }) => [styles.finishButton, pressed && styles.pressedPrimary]}
@@ -714,7 +768,7 @@ const styles = StyleSheet.create({
     color: colors.white,
     overflow: 'hidden',
   },
-  debugBadge: {
+  fallProbBadge: {
     position: 'absolute',
     top: 140,
     left: 0,
@@ -722,17 +776,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 20,
   },
-  debugBadgeText: {
+  fallProbBadgeText: {
     backgroundColor: colors.overlayDark,
     borderWidth: 1,
     borderColor: colors.overlayLightBorder,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: fontWeights.bold,
     color: colors.white,
     overflow: 'hidden',
+  },
+  fallProbBadgeCandidate: {
+    backgroundColor: colors.warningBackground,
+    borderColor: colors.warningBorder,
+  },
+  fallProbBadgeFallen: {
+    backgroundColor: colors.danger,
+    borderColor: colors.danger,
   },
   fallAlertBanner: {
     position: 'absolute',

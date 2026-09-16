@@ -28,6 +28,8 @@ import {
 } from 'react-native-vision-camera';
 import { Worklets } from 'react-native-worklets-core';
 
+import JointAngleDebugOverlay from '../../components/JointAngleDebugOverlay';
+import { useAppMode } from '../../context/AppModeContext';
 import { ExercisePipeline, type ExerciseStatus } from '@/pose/exercise';
 import { FallPipeline, type FallPhase } from '@/pose/fall';
 
@@ -180,7 +182,11 @@ export default function PoseSmokeTestScreen() {
   const personVisibleRef = useRef(true);
 
   // 스모크 테스트용 화면이라 실제 운동 선택 없이 고정 워크아웃(stretching)으로 파이프라인을 돈다.
-  const exercisePipelineRef = useRef(new ExercisePipeline('stretching'));
+  // 튜닝 프로필은 제품 화면과 같이 특수환경 설정을 따른다.
+  const { exerciseTuning, fallTuning } = useAppMode();
+  const [exercisePipeline] = useState(
+    () => new ExercisePipeline('stretching', exerciseTuning),
+  );
   const lastExerciseHoldUpdateRef = useRef(0);
 
   const [phase, setPhase] = useState<FallPhase>('idle');
@@ -191,6 +197,11 @@ export default function PoseSmokeTestScreen() {
   const [exerciseStatus, setExerciseStatus] = useState<ExerciseStatus>('idle');
   const [exerciseStepIndex, setExerciseStepIndex] = useState(0);
   const [exerciseHoldElapsedMs, setExerciseHoldElapsedMs] = useState(0);
+  // 관절 각도 디버그 표(JointAngleDebugOverlay)용 — 홀드 시간과 같은 주기로 갱신.
+  const [debugAngles, setDebugAngles] = useState<{
+    live: (number | null)[] | null;
+    ref: (number | null)[] | null;
+  }>({ live: null, ref: null });
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
@@ -211,11 +222,11 @@ export default function PoseSmokeTestScreen() {
       pipelineRef.current = new FallPipeline((win) => {
         const outputs = model.runSync([win.buffer as ArrayBuffer]);
         return new Float32Array(outputs[0] as ArrayBuffer)[0];
-      });
+      }, fallTuning);
     } else {
       pipelineRef.current = null;
     }
-  }, [tflite]);
+  }, [tflite, fallTuning]);
 
   const isActive = isFocused && appState === 'active';
 
@@ -288,7 +299,7 @@ export default function PoseSmokeTestScreen() {
         worldLandmarks,
         worldRawFramesRef,
       );
-      const exerciseResult = exercisePipelineRef.current.onFrame(
+      const exerciseResult = exercisePipeline.onFrame(
         smoothedWorldLandmarks.length === NUM_LANDMARKS
           ? smoothedWorldLandmarks
           : null,
@@ -302,6 +313,7 @@ export default function PoseSmokeTestScreen() {
       ) {
         lastExerciseHoldUpdateRef.current = now;
         setExerciseHoldElapsedMs(exerciseResult.holdElapsedMs);
+        setDebugAngles({ live: exerciseResult.liveAngles, ref: exerciseResult.refAngles });
       }
 
       const pipeline = pipelineRef.current;
@@ -321,11 +333,11 @@ export default function PoseSmokeTestScreen() {
         setConsecutive(result.consecutive);
       }
     },
-    [landmarksShared, smoothLandmarks],
+    [landmarksShared, smoothLandmarks, exercisePipeline],
   );
 
   const handleStartExercise = useCallback(() => {
-    exercisePipelineRef.current.start();
+    exercisePipeline.start();
     setExerciseStatus('running');
     setExerciseStepIndex(0);
     setExerciseHoldElapsedMs(0);
@@ -431,6 +443,14 @@ export default function PoseSmokeTestScreen() {
           </View>
         </View>
 
+        {/* 8개 관절 현재/기준 각도 표. 이 화면 자체가 개발 전용이라 __DEV__ 가드 없이 항상 표시. */}
+        <JointAngleDebugOverlay
+          liveAngles={debugAngles.live}
+          refAngles={debugAngles.ref}
+          toleranceDeg={exercisePipeline.getState().angleToleranceDeg}
+          style={styles.angleOverlay}
+        />
+
         <View style={styles.exerciseContainer}>
           <View style={styles.exerciseBox}>
             {exerciseStatus === 'idle' && (
@@ -442,7 +462,7 @@ export default function PoseSmokeTestScreen() {
               </Pressable>
             )}
             {exerciseStatus === 'running' && (() => {
-              const { targetPoseName, totalSteps, holdMs } = exercisePipelineRef.current.getState();
+              const { targetPoseName, totalSteps, holdMs } = exercisePipeline.getState();
               return (
                 <>
                   <Text style={styles.exerciseValue}>
@@ -530,6 +550,11 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     marginTop: 4,
+  },
+  // 하단 중앙의 exerciseBox와 겹치지 않도록 낙상 팝업 아래 좌측에 둔다.
+  angleOverlay: {
+    top: 140,
+    bottom: undefined,
   },
   exerciseContainer: {
     position: 'absolute',

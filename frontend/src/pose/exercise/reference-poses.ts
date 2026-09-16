@@ -4,8 +4,9 @@
 // 불러와 라이브 프레임과 동일한 computeJointAngles로 기준 관절 각도를 한 번만 계산해둔다.
 // (라이브/기준 각도 계산 로직이 서로 어긋날 일이 없도록 같은 함수를 재사용.)
 //
-// 포즈별로 판정에 쓸 관절이 다르므로(WORKOUT_POSE_SEQUENCES.activeJoints), 전체 8개
-// 각도를 계산한 뒤 활성 관절이 아닌 슬롯은 null로 마스킹해 WORKOUT_MATCH_TARGETS로 노출한다.
+// 포즈별로 판정에 쓸 관절이 다르므로(PoseStepDef.activeJoints), 전체 8개 각도를 계산한 뒤
+// 활성 관절이 아닌 슬롯은 null로 마스킹한다. 마스킹은 튜닝 프로필마다 다르므로
+// buildMatchTargets()로 프로필별 시퀀스를 받아 만든다.
 // ============================================================
 import stretching1 from '@/assets/poses/stretching1.json';
 import stretching2 from '@/assets/poses/stretching2.json';
@@ -26,10 +27,9 @@ import balance_pose5 from '@/assets/poses/balance_pose5.json';
 
 import {
   JOINT_ANGLE_DEFS,
-  WORKOUT_POSE_SEQUENCES,
   type JointAngleName,
   type PoseName,
-  type WorkoutKey,
+  type PoseStepDef,
 } from './constants';
 import { computeJointAngles, type WorldLandmark } from './geometry';
 
@@ -107,15 +107,12 @@ export type PoseMatchTarget = {
   holdMs: number;
 };
 
-/** workoutKey/stepIndex로 바로 조회 가능한, 마스킹 적용된 매칭 타깃 목록. */
-export const WORKOUT_MATCH_TARGETS: Record<WorkoutKey, PoseMatchTarget[]> = Object.fromEntries(
-  Object.entries(WORKOUT_POSE_SEQUENCES).map(([workoutKey, steps]) => [
-    workoutKey,
-    steps.map((step) => ({
-      poseName: step.poseName,
-      refAngles: maskAngles(FULL_REFERENCE_ANGLES[step.poseName], step.activeJoints),
-      minVisibleJoints: step.activeJoints.length,
-      holdMs: step.holdMs,
-    })),
-  ]),
-) as Record<WorkoutKey, PoseMatchTarget[]>;
+/** 한 워크아웃의 단계 정의를 마스킹 적용된 매칭 타깃 목록으로 변환한다. */
+export function buildMatchTargets(steps: PoseStepDef[]): PoseMatchTarget[] {
+  return steps.map((step) => ({
+    poseName: step.poseName,
+    refAngles: maskAngles(FULL_REFERENCE_ANGLES[step.poseName], step.activeJoints),
+    minVisibleJoints: step.activeJoints.length,
+    holdMs: step.holdMs,
+  }));
+}
