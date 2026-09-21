@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
   AppStateStatus,
+  InteractionManager,
   Pressable,
   StyleSheet,
   Text,
@@ -22,7 +23,6 @@ import {
   useCameraFormat,
   useCameraPermission,
   useFrameProcessor,
-  VisionCameraProxy,
   type Frame,
   type FrameProcessorPlugin,
 } from 'react-native-vision-camera';
@@ -30,6 +30,7 @@ import { Worklets } from 'react-native-worklets-core';
 
 import JointAngleDebugOverlay from '../../components/JointAngleDebugOverlay';
 import { useAppMode } from '../../context/AppModeContext';
+import { getDetectPosePlugin } from '@/pose/detectPosePlugin';
 import { ExercisePipeline, type ExerciseStatus } from '@/pose/exercise';
 import { FallPipeline, type FallPhase } from '@/pose/fall';
 
@@ -53,12 +54,10 @@ type DetectResult = {
   height: number;
 };
 
-// plugin은 화면이 실제로 마운트될 때(컴포넌트 내부 useMemo)만 초기화된다 —
-// 모듈 최상단에서 초기화하면 App.tsx가 이 화면을 import하는 순간 MediaPipe
-// 모델 로딩이 바로 실행돼 앱 시작이 지연된다.
-function detectPose(frame: Frame, plugin: FrameProcessorPlugin | undefined): DetectResult | null {
+// plugin은 호출부(useFrameProcessor)가 null이 아닐 때만 넘긴다. 초기화 시점은
+// pose/detectPosePlugin.ts의 getDetectPosePlugin 주석 참고(마운트 후 useEffect에서 1회).
+function detectPose(frame: Frame, plugin: FrameProcessorPlugin): DetectResult | null {
   'worklet';
-  if (plugin == null) throw new Error('detectPose plugin not loaded');
   return plugin.call(frame, {}) as unknown as DetectResult;
 }
 
@@ -146,12 +145,15 @@ export default function PoseSmokeTestScreen() {
     AppState.currentState,
   );
 
-  // 이 화면이 마운트될 때만 MediaPipe 네이티브 플러그인을 초기화한다(모듈
-  // 최상단 초기화는 앱 시작 시 이 화면을 import하는 즉시 실행돼 지연을 유발함).
-  const plugin = useMemo(
-    () => VisionCameraProxy.initFrameProcessorPlugin('detectPose', {}),
-    [],
-  );
+  // MediaPipe 플러그인 초기화는 JS 스레드를 동기로 막으므로 렌더 중이 아니라 마운트 뒤
+  // effect에서 만든다(ExerciseProgressScreen과 같은 패턴, 인스턴스는 앱 전체 1회 재사용).
+  const [plugin, setPlugin] = useState<FrameProcessorPlugin | null>(null);
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setPlugin(getDetectPosePlugin() ?? null);
+    });
+    return () => task.cancel();
+  }, []);
 
   const format = useCameraFormat(device, [
     { videoAspectRatio: 4 / 3 },
@@ -351,6 +353,7 @@ export default function PoseSmokeTestScreen() {
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet';
+      if (plugin == null) return;
       try {
         runAtTargetFps(TARGET_FPS, () => {
           'worklet';
@@ -372,7 +375,7 @@ export default function PoseSmokeTestScreen() {
     [updateFromFrameOnJS, plugin],
   );
 
-  if (!hasPermission || device == null) {
+  if (!hasPermission || device == null || plugin == null) {
     return (
       <SafeAreaView style={styles.center}>
         <Text style={styles.text}>Loading...</Text>

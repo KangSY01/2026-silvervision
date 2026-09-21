@@ -3,7 +3,15 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AlertTriangle } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, AppStateStatus, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  AppState,
+  AppStateStatus,
+  InteractionManager,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useTensorflowModel } from 'react-native-fast-tflite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -18,7 +26,6 @@ import {
   useCameraFormat,
   useCameraPermission,
   useFrameProcessor,
-  VisionCameraProxy,
   type Frame,
   type FrameProcessorPlugin,
 } from 'react-native-vision-camera';
@@ -45,6 +52,7 @@ import {
   radius,
   spacing,
 } from '../../theme/theme';
+import { getDetectPosePlugin } from '@/pose/detectPosePlugin';
 import { ExercisePipeline, type ExerciseStatus } from '@/pose/exercise';
 import { FallPipeline, type FallPhase } from '@/pose/fall';
 import { mapNormalizedToScreen, type Layout } from '@/pose/screenMapping';
@@ -71,12 +79,10 @@ type DetectResult = {
   height: number;
 };
 
-// plugin은 화면이 실제로 마운트될 때(컴포넌트 내부 useMemo)만 초기화된다 —
-// 모듈 최상단에서 초기화하면 App.tsx가 이 화면을 import하는 순간 MediaPipe
-// 모델 로딩이 바로 실행돼 앱 시작이 지연된다.
-function detectPose(frame: Frame, plugin: FrameProcessorPlugin | undefined): DetectResult | null {
+// plugin은 호출부(useFrameProcessor)가 null이 아닐 때만 넘긴다. 초기화 시점은
+// pose/detectPosePlugin.ts의 getDetectPosePlugin 주석 참고(마운트 후 useEffect에서 1회).
+function detectPose(frame: Frame, plugin: FrameProcessorPlugin): DetectResult | null {
   'worklet';
-  if (plugin == null) throw new Error('detectPose plugin not loaded');
   return plugin.call(frame, {}) as unknown as DetectResult;
 }
 
@@ -202,12 +208,19 @@ export default function ExerciseProgressScreen() {
   const isFocused = useIsFocused();
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
 
-  // 이 화면이 마운트될 때만 MediaPipe 네이티브 플러그인을 초기화한다(모듈
-  // 최상단 초기화는 앱 시작 시 이 화면을 import하는 즉시 실행돼 지연을 유발함).
-  const plugin = useMemo(
-    () => VisionCameraProxy.initFrameProcessorPlugin('detectPose', {}),
-    [],
-  );
+  // MediaPipe 네이티브 플러그인은 초기화가 JS 스레드를 동기로 막는 무거운 호출이라,
+  // 렌더 중(useMemo)에 만들면 첫 렌더가 끝나지 않아 화면 전환 자체가 멈춘다. 그래서
+  // 먼저 이 화면을 "카메라 준비 중…"으로 커밋·전환시키고, 그 뒤 effect에서 만든다.
+  // 화면 전환의 discrete 이벤트로 시작된 렌더는 passive effect가 커밋 직후 같은
+  // 태스크에서 flush될 수 있어, runAfterInteractions로 한 번 더 양보한다. 플러그인
+  // 인스턴스 자체는 앱 전체에서 1회만 만들어 재사용한다(캐시는 getDetectPosePlugin).
+  const [plugin, setPlugin] = useState<FrameProcessorPlugin | null>(null);
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setPlugin(getDetectPosePlugin() ?? null);
+    });
+    return () => task.cancel();
+  }, []);
 
   const format = useCameraFormat(device, [
     { videoAspectRatio: 4 / 3 },
@@ -424,6 +437,7 @@ export default function ExerciseProgressScreen() {
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet';
+      if (plugin == null) return;
       try {
         runAtTargetFps(TARGET_FPS, () => {
           'worklet';
@@ -502,7 +516,7 @@ export default function ExerciseProgressScreen() {
           layoutShared.value = { width, height };
         }}
       >
-        {device != null && hasPermission ? (
+        {device != null && hasPermission && plugin != null ? (
           <Camera
             style={StyleSheet.absoluteFill}
             device={device}

@@ -314,7 +314,7 @@ silvervision/
     │   ├── navigation/types.ts
     │   ├── labels.ts          # 백엔드 enum ↔ 화면 라벨 공용 매핑
     │   ├── notifications/     # exerciseReminder.ts — 운동 알림 시각 설정 (기기 로컬, expo-notifications)
-    │   ├── pose/              # exercise/(운동 자세 매칭)·fall/(낙상 감지) 온디바이스 판정 로직 + screenMapping.ts(좌표 변환) — frontend/AGENTS.md 9장
+    │   ├── pose/              # exercise/(운동 자세 매칭)·fall/(낙상 감지) 온디바이스 판정 로직 + screenMapping.ts(좌표 변환) + detectPosePlugin.ts(MediaPipe 플러그인 지연 싱글턴) — frontend/AGENTS.md 9장
     │   ├── screens/            # common/ senior/ guardian/ — 4.4절 참고
     │   ├── theme/theme.ts
     │   └── types/
