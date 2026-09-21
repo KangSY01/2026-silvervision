@@ -182,6 +182,7 @@ erDiagram
         bigint exercise_id FK
         decimal completion_rate
         decimal accuracy_avg
+        smallint perceived_difficulty
         datetime created_at
     }
 
@@ -263,21 +264,21 @@ erDiagram
 | 운동 | GET·POST | `senior/{senior_id}/missions/` | 운동 미션 목록/생성 | 본인 |
 | 운동 | PATCH | `senior/{senior_id}/missions/{mission_id}/` | 미션 상태 변경 | 본인 |
 | 기록 | GET·POST | `senior/{senior_id}/sessions/` | 운동 세션 목록 / 시작 | GET: 본인·매핑된 보호자 / POST: 본인 |
-| 기록 | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` | 세션 상세(피드백 nested) / 완료 처리. 완료 PATCH 응답에 `fruit_awarded`/`fruit_count`/`today_completed`/`daily_goal`(열매 지급 여부·하루 목표 진행도) 포함 | GET: 본인·매핑된 보호자 / PATCH: 본인 |
+| 기록 | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` | 세션 상세(피드백 nested) / 완료 처리·체감 난이도 자가평가. PATCH는 `completion_rate`/`accuracy_avg`/`perceived_difficulty`(1~5, 2026-09-21 추가) 모두 optional이라 완료 PATCH와 분리된 후속 PATCH로도 온다. 완료 PATCH 응답에 `fruit_awarded`/`fruit_count`/`today_completed`/`daily_goal`(열매 지급 여부·하루 목표 진행도) 포함 | GET: 본인·매핑된 보호자 / PATCH: 본인 |
 | 기록 | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` | 관절별 편차(`PoseFeedback.deviation`) bulk 저장 <sup>[†](#dagger)</sup> | 본인 |
 | 기록 | GET·POST | `senior/{senior_id}/activity-log/` | 기기 활동 로그 조회/기록 | GET: 본인·매핑된 보호자 / POST: 본인 |
-| 기록 | GET·POST | `senior/{senior_id}/ability-log/` | 장기 신체 능력(일별) 조회/upsert. POST는 구현됐으나 프론트 호출자 없음(비전 실측 파생 지표 대기) <sup>[†](#dagger)</sup> | 본인 |
+| 기록 | GET·POST | `senior/{senior_id}/ability-log/` | 장기 신체 능력(일별) 조회/upsert. POST는 구현됐으나 프론트 호출자 없음(비전 실측 파생 지표 대기, 2026-09-21부터 `AbilityHistoryScreen`도 `perceived_difficulty` 자가평가로 전환해 GET도 더 이상 호출하지 않음) <sup>[†](#dagger)</sup> | 본인 |
 | 응급 | GET·POST | `emergency/` | 응급 이벤트 목록 조회 / 생성 | GET: 본인·매핑된 보호자 / POST: 본인 |
 | 응급 | GET·PATCH | `emergency/{event_id}/` | 이벤트 상세(알림·카메라권한 nested) / 상태 전이 | 본인·매핑된 보호자 |
 | 응급 | POST | `emergency/{event_id}/notify/` | 보호자 알림 레코드 생성 + SMS 발송. 이미 `notified`면 재발송 없이 기존 이력만 반환(재호출 멱등) | 본인·매핑된 보호자 |
 | 응급 | POST·DELETE | `emergency/{event_id}/camera-grant/` | 카메라 접근 권한 부여/즉시 만료. 구현·테스트는 완료됐으나 **프론트엔드에서 호출하지 않아 현재 앱 흐름에서는 트리거되지 않음**(4.6절) | 본인·매핑된 보호자 |
 | 게임화 | GET | `senior/{senior_id}/ranking/` | 전국/지역 최신 랭킹 스냅샷 조회 | 본인 |
 
-<a id="dagger"></a>**†  휴면 엔드포인트**: `feedback/`는 예전에 `ExerciseFeedbackScreen`이 placeholder 편차값을 보냈으나, 포즈 매처(`src/pose/exercise/matcher.ts`)가 통과/실패(boolean)만 반환해 실측 관절 편차가 없어 호출을 제거했습니다. 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값(단계 통과율)이고, `ability-log/` POST(관절 가동범위·동작 완성도)도 실측 소스가 없어 프론트가 호출하지 않습니다. matcher가 각도 편차를 함께 반환하도록 확장되면 세 지점 모두 다시 연결됩니다.
+<a id="dagger"></a>**†  휴면 엔드포인트**: `feedback/`는 예전에 `ExerciseFeedbackScreen`이 placeholder 편차값을 보냈으나, 포즈 매처(`src/pose/exercise/matcher.ts`)가 통과/실패(boolean)만 반환해 실측 관절 편차가 없어 호출을 제거했습니다. 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값(단계 통과율)입니다. `ability-log/`(관절 가동범위·동작 완성도)도 같은 이유로 실측 소스가 없어 프론트가 호출하지 않으며, 2026-09-21에 `AbilityHistoryScreen`을 아예 체감 난이도 자가평가(`ExerciseSession.perceived_difficulty`, 1~5, 사용자 입력이라 matcher 확장과 무관하게 이미 실측 가능) 기반으로 교체해 이 엔드포인트에 대한 프론트 의존을 없앴습니다. `feedback/`·`accuracy_avg`는 matcher가 각도 편차를 함께 반환하도록 확장되면 다시 연결될 여지가 남아 있습니다.
 
 전수 감사(2026-09-09) 결과 아래 5개도 같은 패턴(백엔드 구현·프론트 미호출)으로 추가 확인됐습니다: `GET exercises/{id}/`(목록·상세 시리얼라이저가 동일해 상세 조회 이점이 없음), `GET senior/{id}/missions/`·`PATCH .../missions/{mission_id}/`(미션 목록 화면이 없고 완료 집계는 `ExerciseSession.completion_rate`만으로 함. 이 `PATCH` 엔드포인트 자체는 여전히 프론트에서 호출되지 않지만, `mission.status`는 세션 완료 시점에 백엔드가 직접 `completed`로 갱신하도록 2026-09-09에 수정됨), `GET senior/{id}/sessions/{session_id}/`(세션 상세의 `pose_feedbacks` nested 응답에 도달하는 화면 없음), `POST senior/{id}/activity-log/`(로그를 실제로 기록할 시니어 기기 쪽 코드가 없어 무활동 감지 파이프라인 전체가 미연동). 이 중 `GET exercises/{id}/`·`GET·PATCH .../missions/*`는 백엔드 테스트도 없습니다(구현만 됨). 위 모든 엔드포인트·시리얼라이저는 그대로 남아 있습니다.
 
-**미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 87건 통과).
+**미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 95건 통과).
 
 ### 4.3 디렉토리 구조
 
@@ -332,9 +333,9 @@ silvervision/
 | 시니어 | SeniorHomeScreen | ✅ 완료 | 프로필 + 랭킹 조회 |
 | 시니어 | ExerciseSelectScreen | ✅ 완료 | 운동 목록 조회 |
 | 시니어 | ExerciseProgressScreen | ✅ 완료 | **카메라 기반 실시간 포즈 시퀀스 매칭 + 낙상 감지가 실제 동작**(더 이상 placeholder 아님). 진입 시 미션→세션 자동 생성, `completion_rate`=파이프라인이 집계한 단계 통과율, 낙상 확정 시 `POST /emergency/` + 1차 확인 UI(`EmergencyCheckOverlay`) 표시. 세션 생성 실패 시 안내 배너 표시(카메라 판정·낙상 감지는 계속 동작) |
-| 시니어 | ExerciseFeedbackScreen | ✅ 완료 | 세션 완료 PATCH. 응답의 하루 목표 진행도(`today_completed`/`daily_goal`)와 열매 지급 결과(`fruit_awarded`)를 읽어 표시(프론트가 임의로 "+1"을 띄우지 않음) |
+| 시니어 | ExerciseFeedbackScreen | ✅ 완료 | 세션 완료 PATCH. 응답의 하루 목표 진행도(`today_completed`/`daily_goal`)와 열매 지급 결과(`fruit_awarded`)를 읽어 표시(프론트가 임의로 "+1"을 띄우지 않음). 완료 PATCH와 분리된 후속 PATCH로 체감 난이도 자가평가(`perceived_difficulty`, 1~5, 2026-09-21 추가) 전송 — 선택은 필수 아님 |
 | 시니어 | ProfileScreen | ✅ 완료 | 프로필 조회/수정, 로그아웃, 매칭 코드 표시(코드 직접 등록 방식 — 카메라 스캔 아님), 운동 알림 시각 설정(로컬) |
-| 시니어 | AbilityHistoryScreen | ✅ 완료 | 장기 신체 능력(관절 가동범위·동작 완성도) 추이 조회 (조회 전용). 기록 생성 `POST`는 비전 실측값 대기 |
+| 시니어 | AbilityHistoryScreen | ✅ 완료 | (2026-09-21 전면 교체) 완료된 세션 목록 + 체감 난이도 자가평가 조회. 기존 관절 가동범위·동작 완성도 그래프(`ability-log`)는 실측 소스가 없어 영원히 못 채우는 목업이라 제거함 |
 | 보호자 | GuardianLoginScreen | ✅ 완료 | 보호자 로그인 + 프로필 조회 |
 | 보호자 | GuardianSignupScreen | ✅ 완료 | 회원가입 → 즉시 로그인 |
 | 보호자 | GuardianHomeScreen | ✅ 완료 | 피보호자 목록 조회 |
@@ -467,7 +468,7 @@ python manage.py runserver 0.0.0.0:8000     # API는 /api/v1/, admin은 /admin/
 ```bash
 python manage.py check                    # 시스템 체크
 python manage.py makemigrations --check   # 누락된 마이그레이션 확인 (모델 변경 후 필수)
-python manage.py test api                 # 전체 테스트 (87건)
+python manage.py test api                 # 전체 테스트 (95건)
 ```
 
 ### 5.2 프론트엔드 (`frontend/`)

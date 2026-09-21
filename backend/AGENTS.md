@@ -69,7 +69,7 @@
 | | GET·POST | `senior/{senior_id}/missions/` | `IsSeniorSelf` |
 | | PATCH | `senior/{senior_id}/missions/{mission_id}/` — status만 | `IsSeniorSelf` |
 | **기록** | GET·POST | `senior/{senior_id}/sessions/` — 목록 / 세션 시작 | GET `IsSeniorSelfOrMappedGuardian` / POST `IsSeniorSelf` |
-| | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` — GET은 `pose_feedback` nested / PATCH는 `completion_rate`·`accuracy_avg`(완료 시 fruit/ranking 갱신 트리거) | GET `IsSeniorSelfOrMappedGuardian` / PATCH `IsSeniorSelf` |
+| | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` — GET은 `pose_feedback` nested / PATCH는 `completion_rate`·`accuracy_avg`(완료 시 fruit/ranking 갱신 트리거)·`perceived_difficulty`(1~5, 완료 PATCH와 분리된 후속 PATCH도 가능 — 셋 다 optional) | GET `IsSeniorSelfOrMappedGuardian` / PATCH `IsSeniorSelf` |
 | | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` — bulk 저장 (⚠️ 현재 프론트 호출자 없음/휴면 — 3장 참고) | `IsSeniorSelf` |
 | | GET·POST | `senior/{senior_id}/activity-log/` — 기기 활동 로그. GET 최신순(기본 100·최대 500건, `?limit`/`?since`), POST 단건·bulk | GET `IsSeniorSelfOrMappedGuardian` / POST `IsSeniorSelf` |
 | | GET·POST | `senior/{senior_id}/ability-log/` — 장기 신체 능력(일별). GET `logged_date` 오름차순 전체, POST는 `(senior, logged_date)` upsert(신규 201 / 갱신 200) | `IsSeniorSelf` |
@@ -96,7 +96,7 @@
 
 ### 테스트
 
-`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) + `GET /exercises/` 응답의 `pose_workout_key`(포함·null 허용·choices 밖 값은 `full_clean()`에서 거부) + `.../notify/` 멱등성(재호출 시 `EmergencyNotification` row·SMS 미증가) + 세션 완료 시 미션 status `completed` 갱신(멱등 포함) 테스트 88건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
+`api/tests.py`에 보호자-피보호자 매핑 + 시니어 프로필/세션/응급 GET(매핑된 보호자 조회 허용·미매핑 보호자 403·쓰기 차단 포함) + 게임화(fruit_count·ranking) + 활동 로그 + 신체 능력 로그 + 토큰 refresh/로그아웃(blacklist) + 회원가입 비밀번호 규칙(시니어 4자리 PIN / 보호자 8자 조합) + `GET /exercises/` 응답의 `pose_workout_key`(포함·null 허용·choices 밖 값은 `full_clean()`에서 거부) + `.../notify/` 멱등성(재호출 시 `EmergencyNotification` row·SMS 미증가) + 세션 완료 시 미션 status `completed` 갱신(멱등 포함) + 체감 난이도 자가평가(`perceived_difficulty` 저장·1~5 범위 검증·완료 PATCH와 분리된 후속 PATCH) 테스트 95건(DRF `APITestCase`). 그 외 영역은 아직 테스트 없음.
 
 ## 6. Admin
 

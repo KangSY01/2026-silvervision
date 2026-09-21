@@ -124,8 +124,11 @@ NULL을 허용하는 이유는 시드 스크립트·fixture가 없어 `/admin/` 
 | `exercise_id` | BIGINT, FK → `exercise.exercise_id` | |
 | `completion_rate` | DECIMAL, NULL 허용 | 달성률 (세션 시작 시점엔 NULL, 종료 시 채워짐) |
 | `accuracy_avg` | DECIMAL, NULL 허용 | 동작 일치도 평균 (세션 시작 시점엔 NULL, 종료 시 채워짐) |
+| `perceived_difficulty` | SMALLINT(부호없음), NULL 허용 | 체감 난이도 자가평가(1=매우 쉬웠다 ~ 5=매우 힘들었다). 평가 안 함(건너뜀 포함)은 NULL |
 
 **변경 (v2.2, 2026-07-17)**: `POST /senior/{id}/sessions/`(세션 시작)에서 아직 계산되지 않은 값을 요구하지 않도록 `completion_rate`/`accuracy_avg`를 nullable로 변경. 0.00 기본값 대신 NULL을 택한 이유는 `ranking_snapshot.rank_position`과 동일(미측정과 실제 0점을 구분하기 위함).
+
+**변경 (v2.3, 2026-09-21)**: `perceived_difficulty` 신규 추가(마이그레이션 `0010`). `physical_ability_log`(`rom_score`/`completion_score`)는 관절 각도 실측 소스가 없어(`matcher.ts`가 boolean만 반환) 영원히 채워지지 않는 값이었고, 프론트 `AbilityHistoryScreen`이 이를 실제로 채울 수 있는 자가평가 지표로 대체했다. `physical_ability_log` 테이블 자체는 제거하지 않았다(비전 파이프라인이 붙으면 다시 쓸 수 있는 여지). 완료 PATCH(`completion_rate`/`accuracy_avg`)와 분리된 후속 PATCH로 이 필드만 단독 전송도 가능 - `ExerciseSessionCompleteSerializer`가 세 필드 모두 optional이다.
 
 ### `pose_feedback` — 관절 각도 기반 피드백 상세
 

@@ -456,6 +456,71 @@ class ExerciseSessionReadTests(ApiTestBase):
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
 
 
+class PerceivedDifficultyTests(ApiTestBase):
+    """
+    physical_ability_log(rom_score/completion_score) 목업을 대체하는
+    체감 난이도 자가평가(1~5). 완료 PATCH와 분리된 후속 PATCH로도 오므로
+    ExerciseSessionCompleteSerializer가 두 시나리오 모두 받아야 한다.
+    """
+
+    def setUp(self):
+        self.exercise = self.make_exercise()
+        self.senior = self.make_senior('senior1', 'BARCODE-1')
+        self.session = self.make_session(self.senior, self.exercise)
+        self.url = (
+            f'/api/v1/senior/{self.senior.senior_id}'
+            f'/sessions/{self.session.session_id}/'
+        )
+        self.auth('senior', self.senior.senior_id)
+
+    def test_perceived_difficulty_saved_on_patch(self):
+        res = self.client.patch(
+            self.url, {'perceived_difficulty': 4}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['perceived_difficulty'], 4)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.perceived_difficulty, 4)
+
+    def test_perceived_difficulty_rejects_below_range(self):
+        res = self.client.patch(
+            self.url, {'perceived_difficulty': 0}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.session.refresh_from_db()
+        self.assertIsNone(self.session.perceived_difficulty)
+
+    def test_perceived_difficulty_rejects_above_range(self):
+        res = self.client.patch(
+            self.url, {'perceived_difficulty': 6}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.session.refresh_from_db()
+        self.assertIsNone(self.session.perceived_difficulty)
+
+    def test_perceived_difficulty_omitted_stays_null(self):
+        res = self.client.patch(
+            self.url, {'completion_rate': '80.00'}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.session.refresh_from_db()
+        self.assertIsNone(self.session.perceived_difficulty)
+
+    def test_perceived_difficulty_can_follow_completion_patch_separately(self):
+        first = self.client.patch(
+            self.url, {'completion_rate': '100.00', 'accuracy_avg': '100.00'},
+            format='json',
+        )
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        second = self.client.patch(
+            self.url, {'perceived_difficulty': 2}, format='json',
+        )
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.completion_rate, 100)
+        self.assertEqual(self.session.perceived_difficulty, 2)
+
+
 class EmergencyEventReadTests(ApiTestBase):
     def setUp(self):
         self.senior = self.make_senior('senior1', 'BARCODE-1')

@@ -1,6 +1,6 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Award, ChevronRight, LineChart, MapPin, Sparkles } from 'lucide-react-native';
+import { Award, ChevronRight, ClipboardList, MapPin, Sparkles } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G, Path, Text as SvgText } from 'react-native-svg';
@@ -283,12 +283,12 @@ export default function SeniorHomeScreen() {
             style={({ pressed }) => [styles.abilityCard, pressed && styles.abilityCardPressed]}
           >
             <View style={styles.abilityIconWrap}>
-              <LineChart size={28} color={colors.primary} strokeWidth={2.5} />
+              <ClipboardList size={28} color={colors.primary} strokeWidth={2.5} />
             </View>
             <View style={styles.abilityTextArea}>
-              <Text style={styles.abilityTitle}>내 건강 변화 보기</Text>
+              <Text style={styles.abilityTitle}>내 운동 기록 보기</Text>
               <Text style={styles.abilityDescription}>
-                관절 가동범위·동작 완성도가 2주간 어떻게 변했는지 그래프로 확인해요.
+                최근 운동은 어떠셨는지 확인해요.
               </Text>
             </View>
             <ChevronRight size={24} color={colors.disabledText} strokeWidth={2.5} />

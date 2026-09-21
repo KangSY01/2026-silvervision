@@ -20,6 +20,8 @@ _2026-09-08 갱신: FCM 제거 → 솔라피(Solapi) SMS 실발송으로 교체.
 
 _2026-09-09 갱신: `.../notify/` 중복 SMS 버그 수정. 마이그레이션 `0009`(`EmergencyNotification` unique_together `(event, guardian)`) 추가로 현재 `0001`~`0009`. `EmergencyNotifyView`는 이미 `notified`인 event 재호출 시 row·SMS를 재생성하지 않고 기존 이력만 200으로 반환한다(처음 전이 시에만 201 + 생성 + 발송), race는 `get_or_create`로 흡수. `api/tests.py`는 87건 통과(멱등성 테스트 2건 추가). 이후 세션 완료 시 `ExerciseMission.status`를 `completed`로 자동 갱신(`ExerciseSessionDetailView.perform_update`, 화면 비노출·데이터 정합성 목적)하도록 수정, 미션 status 자동 완료 처리 테스트 1건 추가로 88건._
 
+_2026-09-21 갱신: 관절/완성도 목업(`physical_ability_log`, rom_score/completion_score) 제거 → 체감 난이도 자가평가로 교체. 관절 각도 실측 소스가 없어(matcher가 boolean만 반환) 영원히 못 채우던 값이었다. 마이그레이션 `0010`(`ExerciseSession.perceived_difficulty`, 1~5, null=평가 안 함) 추가로 현재 `0001`~`0010`. `ExerciseSessionCompleteSerializer`가 이 필드를 완료 PATCH와 별개로 받을 수 있게 optional로 추가(1~5 범위 검증), `api/tests.py`는 95건 통과(범위 검증·완료 PATCH와 분리된 후속 PATCH 테스트 5건 추가). 프론트 `ExerciseFeedbackScreen`에 완료 PATCH와 분리된 5단계 자가평가 UI 추가(선택 안 해도 무방), `AbilityHistoryScreen`을 조회 전용 그래프 화면에서 "완료 세션 + 체감 난이도" 목록 화면으로 전면 교체(제목도 "건강 변화 추적"→"내 운동 기록"). `ability-log` 엔드포인트·`PhysicalAbilityLog` 모델은 백엔드에 그대로 남아 있으나 이제 프론트 호출자가 없다._
+
 이 문서는 두 영역을 아우르는 명령어와 아키텍처 요약만 다룬다. 화면 목록, 테이블 전체 목록 등 세부사항은 중복 기술하지 않으므로 위 문서를 참고할 것.
 
 ## 프로젝트 개요

@@ -1,12 +1,12 @@
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { ArrowLeft, Activity, TrendingUp } from 'lucide-react-native';
+import { ArrowLeft, ClipboardList } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 import {
   apiClient,
+  ExerciseResponse,
+  ExerciseSessionResponse,
   getSession,
-  PhysicalAbilityLogResponse,
 } from '../../api/client';
 import {
   colors,
@@ -18,89 +18,35 @@ import {
 } from '../../theme/theme';
 
 type LoadState = 'loading' | 'ready' | 'error';
-type Metric = 'rom' | 'completion';
 
-// 추이를 보여줄 창(2주). 중간보고서의 "주/월 단위 변화 그래프" 취지를 살리되
-// 범위 토글까지 두는 건 과설계라 판단해 고정 2주 창으로 둔다. 하루 최대 1건이라
-// 최대 14개 점이고, 좁은 화면 폭에 맞춰 날짜 라벨은 점이 있는 날에만 그린다.
-const WINDOW_DAYS = 14;
-
-const CHART_WIDTH = 320;
-const CHART_HEIGHT = 150;
-const CHART_TOP = 14;
-const CHART_BASELINE = 120; // y=CHART_BASELINE 이 0점, y=CHART_TOP 이 100점
-const PLOT_HEIGHT = CHART_BASELINE - CHART_TOP;
-
-// rom_score/completion_score의 척도는 백엔드에서 아직 확정 전이다
-// (PhysicalAbilityLogSerializer 주석: "점수 상한은 척도가 아직 확정 전이라
-// 두지 않는다"). 중간보고서는 두 값을 "완성도/가동범위" 점수로 서술하므로
-// 0~100 스케일로 그리고, 벗어난 값은 축 안으로 clamp해 표시한다(실제 수치는
-// 라벨로 그대로 노출).
-const SCORE_MAX = 100;
-
-const METRIC_META: Record<
-  Metric,
-  { label: string; short: string; unit: string; description: string }
-> = {
-  rom: {
-    label: '관절 가동범위',
-    short: '가동범위',
-    unit: '점',
-    description: '관절을 움직일 수 있는 범위를 점수로 나타낸 값이에요.',
-  },
-  completion: {
-    label: '동작 완성도',
-    short: '완성도',
-    unit: '점',
-    description: '운동 동작을 기준 자세에 얼마나 가깝게 해내셨는지 나타낸 값이에요.',
-  },
+// 체감 난이도 자가평가(1~5) → 표시 라벨. null은 평가를 건너뛴 세션(과거 세션 포함).
+// Record 패턴은 ExerciseSelectScreen의 DIFFICULTY_LABELS와 동일 - enum이 늘면
+// 컴파일 타임에 누락이 드러난다.
+const PERCEIVED_DIFFICULTY_LABELS: Record<1 | 2 | 3 | 4 | 5, { emoji: string; label: string }> = {
+  1: { emoji: '😊', label: '매우 쉬웠다' },
+  2: { emoji: '🙂', label: '쉬웠다' },
+  3: { emoji: '😐', label: '할만했다' },
+  4: { emoji: '😓', label: '힘들었다' },
+  5: { emoji: '😣', label: '매우 힘들었다' },
 };
 
-interface DayBucket {
-  key: string; // 'YYYY-MM-DD' (기기 로컬 기준)
-  label: string; // 'M/D'
-}
-
-// 오늘부터 WINDOW_DAYS-1 일 전까지, 오래된 → 최신 순의 일 단위 버킷.
-function recentDayBuckets(): DayBucket[] {
-  const base = new Date();
-  base.setHours(0, 0, 0, 0);
-  const buckets: DayBucket[] = [];
-  for (let offset = WINDOW_DAYS - 1; offset >= 0; offset -= 1) {
-    const day = new Date(base);
-    day.setDate(day.getDate() - offset);
-    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(
-      day.getDate(),
-    ).padStart(2, '0')}`;
-    buckets.push({ key, label: `${day.getMonth() + 1}/${day.getDate()}` });
-  }
-  return buckets;
-}
-
-function xForIndex(index: number, count: number) {
-  const paddingX = 24;
-  const usable = CHART_WIDTH - paddingX * 2;
-  if (count <= 1) return CHART_WIDTH / 2;
-  return paddingX + (usable / (count - 1)) * index;
-}
-
-function yForScore(score: number) {
-  const clamped = Math.max(0, Math.min(SCORE_MAX, score));
-  return CHART_BASELINE - (clamped / SCORE_MAX) * PLOT_HEIGHT;
-}
-
-interface Point {
-  x: number;
-  score: number;
-  label: string;
+// created_at(ISO) → "2026. 09. 21 10:15" 형태. 파싱 실패 시 원문을 그대로 반환.
+function formatSessionDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}. ${pad(date.getMonth() + 1)}. ${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
 }
 
 export default function AbilityHistoryScreen() {
   const navigation = useNavigation();
 
   const [loadState, setLoadState] = useState<LoadState>('loading');
-  const [logs, setLogs] = useState<PhysicalAbilityLogResponse[]>([]);
-  const [metric, setMetric] = useState<Metric>('completion');
+  const [sessions, setSessions] = useState<ExerciseSessionResponse[]>([]);
+  const [exerciseNames, setExerciseNames] = useState<Record<number, string>>({});
 
   // 진입/복귀마다 재조회(다른 시니어 연동 화면과 동일 패턴). 최초만 'loading'을
   // 노출하고, 이후 포커스 재조회는 기존 화면을 둔 채 조용히 갱신한다.
@@ -112,10 +58,16 @@ export default function AbilityHistoryScreen() {
         setLoadState('error');
         return;
       }
-      const res = await apiClient.get<PhysicalAbilityLogResponse[]>(
-        `/senior/${session.userId}/ability-log/`,
+      const [sessionRes, exerciseRes] = await Promise.all([
+        apiClient.get<ExerciseSessionResponse[]>(`/senior/${session.userId}/sessions/`),
+        apiClient.get<ExerciseResponse[]>('/exercises/'),
+      ]);
+      setSessions(sessionRes);
+      // 세션 목록에는 운동 이름이 nested 안 되어 있어(exercise PK만) 별도 매핑
+      // (SeniorDetailScreen과 동일 패턴).
+      setExerciseNames(
+        Object.fromEntries(exerciseRes.map((ex) => [ex.exercise_id, ex.name])),
       );
-      setLogs(res);
       setLoadState('ready');
     } catch {
       setLoadState('error');
@@ -128,46 +80,16 @@ export default function AbilityHistoryScreen() {
     }, [load]),
   );
 
-  const buckets = useMemo(() => recentDayBuckets(), []);
-
-  // 날짜(logged_date) → 그 날 기록. 하루 1건이라 그대로 맵으로 만든다.
-  const byDate = useMemo(() => {
-    const map = new Map<string, PhysicalAbilityLogResponse>();
-    for (const log of logs) map.set(log.logged_date, log);
-    return map;
-  }, [logs]);
-
-  // 현재 지표에 대해, 최근 2주 창에서 값이 있는 날만 점으로. 값 없는 날은
-  // 점을 생략한다(SeniorDetailScreen의 데이터 없는 날 처리와 같은 원칙).
-  const points = useMemo<Point[]>(() => {
-    const field = metric === 'rom' ? 'rom_score' : 'completion_score';
-    const result: Point[] = [];
-    buckets.forEach((bucket, index) => {
-      const log = byDate.get(bucket.key);
-      if (!log) return;
-      const value = Number(log[field]);
-      if (Number.isNaN(value)) return;
-      result.push({
-        x: xForIndex(index, buckets.length),
-        score: value,
-        label: bucket.label,
-      });
-    });
-    return result;
-  }, [buckets, byDate, metric]);
-
-  const pathD = points
-    .map((p, index) => `${index === 0 ? 'M' : 'L'} ${p.x} ${yForScore(p.score)}`)
-    .join(' ');
-
-  const latest = points.length > 0 ? points[points.length - 1] : null;
-  const first = points.length > 0 ? points[0] : null;
-  const delta =
-    latest && first && points.length > 1
-      ? Math.round((latest.score - first.score) * 10) / 10
-      : null;
-
-  const meta = METRIC_META[metric];
+  // 완료된 세션만 "운동 기록"으로 보여준다(진행 중 이탈로 남은 미완료 세션은
+  // 제외 - ExerciseFeedbackScreen이 완료 시에만 completion_rate를 채운다).
+  // 최신순으로 정렬.
+  const completedSessions = useMemo(
+    () =>
+      sessions
+        .filter((s) => s.completion_rate !== null)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [sessions],
+  );
 
   const handleBack = () => navigation.goBack();
 
@@ -182,9 +104,9 @@ export default function AbilityHistoryScreen() {
           <Text style={styles.backButtonText}>홈으로</Text>
         </Pressable>
 
-        <Text style={styles.title}>건강 변화 추적</Text>
+        <Text style={styles.title}>내 운동 기록</Text>
         <Text style={styles.subtitle}>
-          운동하실 때마다 관절 가동범위와 동작 완성도를 기록해 2주간 변화를 보여드려요.
+          최근에 어떤 운동을 하셨는지, 얼마나 힘드셨는지 확인해요.
         </Text>
       </View>
 
@@ -207,180 +129,51 @@ export default function AbilityHistoryScreen() {
               <Text style={styles.retryButtonText}>다시 시도</Text>
             </Pressable>
           </View>
+        ) : completedSessions.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <ClipboardList size={32} color={colors.disabledText} strokeWidth={2} />
+            <Text style={styles.emptyTitle}>아직 완료한 운동이 없어요</Text>
+            <Text style={styles.emptyText}>운동을 끝까지 완료하시면 여기에 기록이 쌓여요.</Text>
+          </View>
         ) : (
-          <>
-            {/* 지표 전환 토글 */}
-            <View style={styles.metricRow}>
-              {(['completion', 'rom'] as Metric[]).map((key) => {
-                const active = metric === key;
-                return (
-                  <Pressable
-                    key={key}
-                    onPress={() => setMetric(key)}
-                    style={({ pressed }) => [
-                      styles.metricButton,
-                      active && styles.metricButtonActive,
-                      pressed && !active && styles.metricButtonPressed,
-                    ]}
-                  >
-                    <Text
-                      style={[styles.metricButtonText, active && styles.metricButtonTextActive]}
-                    >
-                      {METRIC_META[key].label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <View style={styles.card}>
-              <View style={styles.cardTitleRow}>
-                <Activity size={20} color={colors.primary} strokeWidth={2.5} />
-                <Text style={styles.cardTitle}>{meta.label} 변화</Text>
-              </View>
-              <Text style={styles.cardDescription}>{meta.description}</Text>
-
-              {points.length === 0 ? (
-                <View style={styles.emptyChartBox}>
-                  <Text style={styles.emptyChartTitle}>아직 기록이 없어요</Text>
-                  <Text style={styles.emptyChartText}>
-                    운동 자세 분석(카메라) 기능이 연결되면 운동하실 때마다 이 그래프에
-                    변화가 쌓입니다.
+          completedSessions.map((s) => {
+            const difficulty =
+              s.perceived_difficulty != null
+                ? PERCEIVED_DIFFICULTY_LABELS[
+                    s.perceived_difficulty as 1 | 2 | 3 | 4 | 5
+                  ]
+                : null;
+            return (
+              <View key={s.session_id} style={styles.sessionCard}>
+                <View style={styles.sessionTextArea}>
+                  <Text style={styles.sessionExerciseName}>
+                    {exerciseNames[s.exercise] ?? '운동'}
                   </Text>
+                  <Text style={styles.sessionDate}>{formatSessionDate(s.created_at)}</Text>
                 </View>
-              ) : (
-                <>
-                  <View style={styles.summaryRow}>
-                    <View style={styles.summaryItem}>
-                      <Text style={styles.summaryLabel}>최근 기록</Text>
-                      <Text style={styles.summaryValue}>
-                        {latest ? Math.round(latest.score * 10) / 10 : '-'}
-                        <Text style={styles.summaryUnit}> {meta.unit}</Text>
-                      </Text>
-                    </View>
-                    {delta !== null ? (
-                      <View style={styles.summaryItem}>
-                        <View style={styles.summaryDeltaRow}>
-                          <TrendingUp
-                            size={16}
-                            color={delta >= 0 ? colors.primary : colors.danger}
-                            strokeWidth={2.5}
-                          />
-                          <Text
-                            style={[
-                              styles.summaryDelta,
-                              { color: delta >= 0 ? colors.primary : colors.danger },
-                            ]}
-                          >
-                            {delta >= 0 ? '+' : ''}
-                            {delta} {meta.unit}
-                          </Text>
-                        </View>
-                        <Text style={styles.summaryLabel}>2주 전 첫 기록 대비</Text>
-                      </View>
-                    ) : null}
-                  </View>
-
-                  <View style={styles.chartBox}>
-                    <Svg
-                      width="100%"
-                      height={CHART_HEIGHT}
-                      viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-                    >
-                      {/* 25/50/75/100점 보조선 */}
-                      {[0, 25, 50, 75, 100].map((score) => (
-                        <Line
-                          key={score}
-                          x1={0}
-                          y1={yForScore(score)}
-                          x2={CHART_WIDTH}
-                          y2={yForScore(score)}
-                          stroke={colors.borderLight}
-                          strokeWidth={1}
-                          strokeDasharray={score === 0 ? undefined : '4,4'}
-                        />
-                      ))}
-
-                      {points.length > 1 ? (
-                        <Path
-                          d={pathD}
-                          fill="none"
-                          stroke={colors.primary}
-                          strokeWidth={3}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      ) : null}
-
-                      {points.map((p) => (
-                        <Circle
-                          key={`${p.label}-${p.score}`}
-                          cx={p.x}
-                          cy={yForScore(p.score)}
-                          r={5}
-                          fill={colors.primary}
-                        />
-                      ))}
-                      {points.map((p) => (
-                        <SvgText
-                          key={`v-${p.label}-${p.score}`}
-                          x={p.x}
-                          y={yForScore(p.score) - 12}
-                          fontSize={11}
-                          fontWeight="bold"
-                          fill={colors.primary}
-                          textAnchor="middle"
-                        >
-                          {Math.round(p.score)}
-                        </SvgText>
-                      ))}
-                      {points.map((p) => (
-                        <SvgText
-                          key={`d-${p.label}-${p.score}`}
-                          x={p.x}
-                          y={CHART_HEIGHT - 6}
-                          fontSize={11}
-                          fontWeight="bold"
-                          fill={colors.textSecondary}
-                          textAnchor="middle"
-                        >
-                          {p.label}
-                        </SvgText>
-                      ))}
-                    </Svg>
-                  </View>
-
-                  {points.length === 1 ? (
-                    <Text style={styles.singlePointHint}>
-                      아직 기록이 하루치뿐이에요. 며칠 더 운동하시면 변화 그래프가 그려집니다.
-                    </Text>
-                  ) : null}
-                </>
-              )}
-            </View>
-
-            <Text style={styles.footnote}>
-              관절 가동범위·동작 완성도 점수는 운동 중 카메라 자세 분석으로 측정됩니다.
-              분석 기능이 연결되기 전까지는 기록이 쌓이지 않습니다.
-            </Text>
-          </>
+                <View
+                  style={[
+                    styles.difficultyPill,
+                    difficulty == null && styles.difficultyPillMuted,
+                  ]}
+                >
+                  {difficulty ? (
+                    <>
+                      <Text style={styles.difficultyPillEmoji}>{difficulty.emoji}</Text>
+                      <Text style={styles.difficultyPillText}>{difficulty.label}</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.difficultyPillMutedText}>평가 안 함</Text>
+                  )}
+                </View>
+              </View>
+            );
+          })
         )}
       </ScrollView>
     </View>
   );
 }
-
-// TODO(vision): 이 화면은 현재 조회 전용이다. rom_score/completion_score는
-// 온디바이스 자세 추정(BlazePose) 결과여야 하는데 비전 파이프라인이 아직
-// 붙지 않았다. 유일한 후보 소스인 ExerciseSession.accuracy_avg 는 현재
-// ExerciseProgressScreen이 completedSteps/totalSteps 비율로 채워 보내는 값이라
-// (matcher.ts의 matchesPose()가 boolean만 반환 → 관절별 각도 편차 없음)
-// completion_rate 와 완전히 같은 "단계 통과율"이다. "동작 완성도"(자세를 얼마나
-// 정확히 완성했나)와 의미가 달라 그대로 completion_score로 쓰면 지난 배치들의
-// "없는 데이터를 지어내지 않는다" 원칙에 어긋난다. 따라서 POST /senior/{id}/
-// ability-log/ 호출은 matcher가 각도 편차를 함께 반환하도록 확장되는 시점까지
-// 미룬다. 연동 시 훅 지점: ExerciseFeedbackScreen의 세션 완료 useEffect에서
-// 완료 PATCH 직후, 그 날 완료 세션들의 실측 rom/accuracy 값으로 upsert POST.
 
 const styles = StyleSheet.create({
   container: {
@@ -423,7 +216,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: spacing.lg,
-    gap: spacing.lg,
+    gap: spacing.md,
   },
   stateBox: {
     gap: spacing.md,
@@ -447,138 +240,84 @@ const styles = StyleSheet.create({
     fontWeight: fontWeights.black,
     color: colors.white,
   },
-  metricRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  metricButton: {
-    flex: 1,
-    minHeight: MIN_TOUCH_TARGET,
-    borderRadius: radius.md,
-    borderWidth: 2,
-    borderColor: colors.borderLight,
-    backgroundColor: colors.surface,
+  emptyBox: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
-  },
-  metricButtonActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  metricButtonPressed: {
-    borderColor: colors.primary,
-  },
-  metricButtonText: {
-    fontSize: fontSizes.body,
-    fontWeight: fontWeights.bold,
-    color: colors.textMuted,
-  },
-  metricButtonTextActive: {
-    color: colors.white,
-  },
-  card: {
+    gap: spacing.sm,
     backgroundColor: colors.surface,
-    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+  },
+  emptyTitle: {
+    fontSize: fontSizes.subtitle,
+    fontWeight: fontWeights.black,
+    color: colors.text,
+  },
+  emptyText: {
+    fontSize: fontSizes.caption,
+    fontWeight: fontWeights.medium,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 26,
+  },
+  sessionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.treeCardBorder,
-    padding: spacing.md + spacing.xs,
+    padding: spacing.md,
     shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.03,
     shadowRadius: 16,
     elevation: 1,
   },
-  cardTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
+  sessionTextArea: {
+    flex: 1,
   },
-  cardTitle: {
-    fontSize: fontSizes.subtitle,
-    fontWeight: fontWeights.black,
-    color: colors.text,
-  },
-  cardDescription: {
-    fontSize: fontSizes.caption,
-    fontWeight: fontWeights.medium,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-    lineHeight: 26,
-  },
-  emptyChartBox: {
-    marginTop: spacing.md,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    borderRadius: radius.md,
-    padding: spacing.lg,
-    gap: spacing.sm,
-  },
-  emptyChartTitle: {
+  sessionExerciseName: {
     fontSize: fontSizes.body,
     fontWeight: fontWeights.black,
     color: colors.text,
   },
-  emptyChartText: {
+  sessionDate: {
     fontSize: fontSizes.caption,
     fontWeight: fontWeights.medium,
     color: colors.textSecondary,
-    lineHeight: 26,
+    marginTop: spacing.xs,
   },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: spacing.lg,
-    marginTop: spacing.md,
-    flexWrap: 'wrap',
-  },
-  summaryItem: {
-    gap: spacing.xs,
-  },
-  summaryLabel: {
-    fontSize: 15,
-    fontWeight: fontWeights.semibold,
-    color: colors.disabledText,
-  },
-  summaryValue: {
-    fontSize: 28,
-    fontWeight: fontWeights.black,
-    color: colors.primary,
-  },
-  summaryUnit: {
-    fontSize: 16,
-    fontWeight: fontWeights.bold,
-    color: colors.disabledText,
-  },
-  summaryDeltaRow: {
+  difficultyPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-  },
-  summaryDelta: {
-    fontSize: 22,
-    fontWeight: fontWeights.black,
-  },
-  chartBox: {
-    marginTop: spacing.md,
-    backgroundColor: colors.background,
+    backgroundColor: colors.primarySoftBackground,
     borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderColor: colors.primaryTintBorder,
     borderRadius: radius.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
-  singlePointHint: {
+  difficultyPillMuted: {
+    backgroundColor: colors.grayBadgeBackground,
+    borderColor: colors.borderLight,
+  },
+  difficultyPillEmoji: {
+    fontSize: 18,
+  },
+  difficultyPillText: {
+    fontSize: fontSizes.caption,
+    fontWeight: fontWeights.bold,
+    color: colors.primary,
+  },
+  difficultyPillMutedText: {
     fontSize: fontSizes.caption,
     fontWeight: fontWeights.medium,
-    color: colors.textSecondary,
-    marginTop: spacing.sm,
-    lineHeight: 26,
-  },
-  footnote: {
-    fontSize: 15,
-    fontWeight: fontWeights.medium,
     color: colors.disabledText,
-    lineHeight: 24,
   },
   pressedOpacity: {
     opacity: 0.6,

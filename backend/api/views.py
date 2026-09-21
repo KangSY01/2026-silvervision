@@ -453,8 +453,10 @@ class ExerciseSessionDetailView(generics.RetrieveUpdateAPIView):
     GET   - 세션 상세 (연결된 pose_feedback 포함, ExerciseSessionDetailSerializer).
             시니어 본인 또는 GuardianSeniorMap으로 연결된 보호자가 조회할
             수 있다 (IsSeniorSelfOrMappedGuardian).
-    PATCH - completion_rate/accuracy_avg 저장 (ExerciseSessionCompleteSerializer).
-            운동 수행 주체인 **시니어 본인만** 가능하다 (IsSeniorSelf).
+    PATCH - completion_rate/accuracy_avg/perceived_difficulty 저장
+            (ExerciseSessionCompleteSerializer). 셋 다 optional이라 체감
+            난이도만 담은 후속 PATCH(완료 PATCH와 분리)도 이 엔드포인트를
+            그대로 쓴다. 운동 수행 주체인 **시니어 본인만** 가능하다 (IsSeniorSelf).
     session_id가 URL의 senior_id 소속이 아니면 get_queryset() 필터링 때문에
     조회되지 않아 404가 된다 (V6의 미션 PATCH와 동일한 기준). senior_id
     스코프 자체에 대한 권한이 없으면(매핑 안 된 보호자·타 시니어) 그보다

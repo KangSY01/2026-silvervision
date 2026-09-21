@@ -1,7 +1,7 @@
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { CheckCircle2, Sparkles } from 'lucide-react-native';
+import { CheckCircle2, Info, Sparkles } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +21,16 @@ import {
 } from '../../theme/theme';
 
 type Route = NativeStackScreenProps<RootStackParamList, 'ExerciseFeedback'>['route'];
+
+// 체감 난이도 자가평가 - rom_score/completion_score(관절 각도 실측) 대신
+// 실제로 채울 수 있는 지표로 physical_ability_log를 대체한다.
+const DIFFICULTY_OPTIONS: { value: 1 | 2 | 3 | 4 | 5; emoji: string; label: string }[] = [
+  { value: 1, emoji: '😊', label: '매우 쉬웠다' },
+  { value: 2, emoji: '🙂', label: '쉬웠다' },
+  { value: 3, emoji: '😐', label: '할만했다' },
+  { value: 4, emoji: '😓', label: '힘들었다' },
+  { value: 5, emoji: '😣', label: '매우 힘들었다' },
+];
 
 export default function ExerciseFeedbackScreen() {
   const navigation = useNavigation();
@@ -44,6 +54,27 @@ export default function ExerciseFeedbackScreen() {
     | { state: 'done'; awarded: boolean; total: number; todayCompleted: number; dailyGoal: number }
   >(sessionId == null ? { state: 'failed' } : { state: 'pending' });
 
+  // 체감 난이도 PATCH는 완료 PATCH와 분리된 후속 요청 - 어떤 시니어인지는
+  // 완료 PATCH에서 이미 조회한 session.userId를 재사용한다.
+  const [seniorId, setSeniorId] = useState<number | null>(null);
+  const [difficulty, setDifficulty] = useState<{
+    selected: (typeof DIFFICULTY_OPTIONS)[number]['value'] | null;
+    status: 'idle' | 'saving' | 'done' | 'failed';
+  }>({ selected: null, status: 'idle' });
+
+  const handleSelectDifficulty = async (value: (typeof DIFFICULTY_OPTIONS)[number]['value']) => {
+    if (sessionId == null || seniorId == null) return;
+    setDifficulty({ selected: value, status: 'saving' });
+    try {
+      await apiClient.patch(`/senior/${seniorId}/sessions/${sessionId}/`, {
+        perceived_difficulty: value,
+      });
+      setDifficulty({ selected: value, status: 'done' });
+    } catch {
+      setDifficulty({ selected: value, status: 'failed' });
+    }
+  };
+
   useEffect(() => {
     if (sessionId == null) return;
     let cancelled = false;
@@ -54,6 +85,7 @@ export default function ExerciseFeedbackScreen() {
           if (!cancelled) setReward({ state: 'failed' });
           return;
         }
+        setSeniorId(session.userId);
         // accuracy_avg와 completion_rate는 지금 **같은 값**이다. 둘 다
         // completedSteps/totalSteps 비율이며, 관절 정확도가 아니라 "단계를
         // 몇 개 통과했는가"다. matcher.ts의 matchesPose()가 boolean만 반환해
@@ -203,6 +235,49 @@ export default function ExerciseFeedbackScreen() {
             </Text>
           </View>
         </LinearGradient>
+
+        {/* 체감 난이도 자가평가 - 필수 아님, 벗어나도(뒤로가기 등) 문제없다. */}
+        <View style={styles.difficultyCard}>
+          <Text style={styles.difficultyTitle}>오늘 운동, 어떠셨어요?</Text>
+          <Text style={styles.difficultySubtitle}>선택 안 하셔도 괜찮아요.</Text>
+
+          <View style={styles.difficultyList}>
+            {DIFFICULTY_OPTIONS.map((option) => {
+              const selected = difficulty.selected === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => void handleSelectDifficulty(option.value)}
+                  disabled={difficulty.status === 'saving'}
+                  style={({ pressed }) => [
+                    styles.difficultyOption,
+                    selected && styles.difficultyOptionSelected,
+                    pressed && !selected && styles.pressedOpacity,
+                  ]}
+                >
+                  <Text style={styles.difficultyEmoji}>{option.emoji}</Text>
+                  <Text
+                    style={[
+                      styles.difficultyLabel,
+                      selected && styles.difficultyLabelSelected,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {difficulty.status === 'failed' ? (
+            <View style={styles.difficultyErrorBox}>
+              <Info size={18} color={colors.danger} />
+              <Text style={styles.difficultyErrorText}>
+                저장하지 못했습니다. 다시 눌러 주세요.
+              </Text>
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
 
       {/* Primary Confirm Button */}
@@ -383,6 +458,78 @@ const styles = StyleSheet.create({
     color: colors.amberText,
     marginTop: spacing.xs,
     lineHeight: 26,
+  },
+  difficultyCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: colors.treeCardBorder,
+    padding: spacing.lg,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.03,
+    shadowRadius: 16,
+    elevation: 1,
+  },
+  difficultyTitle: {
+    fontSize: fontSizes.subtitle,
+    fontWeight: fontWeights.black,
+    color: colors.text,
+  },
+  difficultySubtitle: {
+    fontSize: fontSizes.caption,
+    fontWeight: fontWeights.medium,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  difficultyList: {
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  difficultyOption: {
+    minHeight: MIN_TOUCH_TARGET,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 2,
+    borderColor: colors.borderLight,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.background,
+  },
+  difficultyOptionSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  difficultyEmoji: {
+    fontSize: 28,
+  },
+  difficultyLabel: {
+    fontSize: fontSizes.body,
+    fontWeight: fontWeights.bold,
+    color: colors.text,
+  },
+  difficultyLabelSelected: {
+    color: colors.white,
+  },
+  difficultyErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    backgroundColor: colors.dangerBackground,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+  },
+  difficultyErrorText: {
+    fontSize: fontSizes.caption,
+    fontWeight: fontWeights.bold,
+    color: colors.danger,
+  },
+  pressedOpacity: {
+    opacity: 0.6,
   },
   footer: {
     padding: spacing.lg,
