@@ -123,6 +123,9 @@ export interface ExerciseSessionResponse {
   exercise: number;
   completion_rate: string | null;
   accuracy_avg: string | null;
+  // 체감 난이도 자가평가(1=매우 쉬웠다 ~ 5=매우 힘들었다). 관절 각도 실측이 없어
+  // physical_ability_log를 대체하는 지표 - 평가 안 함(건너뜀 포함)은 null.
+  perceived_difficulty: number | null;
   created_at: string;
 }
 
@@ -139,6 +142,9 @@ export interface ExerciseSessionCompleteResponse {
   session_id: number;
   completion_rate: string | null;
   accuracy_avg: string | null;
+  // 체감 난이도 자가평가. 완료 PATCH와 분리된 후속 PATCH(perceived_difficulty만
+  // 담은 요청)도 이 응답 형태를 그대로 쓴다.
+  perceived_difficulty: number | null;
   fruit_count: number;
   fruit_awarded: boolean;
   /** 이번 완료를 포함한 오늘의 운동 수. */
@@ -159,27 +165,6 @@ export interface ActivityLogResponse {
   senior: number;
   activity_type: string;
   logged_at: string;
-}
-
-/**
- * backend/api/serializers.py의 PhysicalAbilityLogSerializer 응답 형태
- * (GET /senior/{id}/ability-log/ 목록 항목, POST upsert 응답). 장기 신체 능력
- * 추적의 일별 기록 한 건이며 하루 최대 1건이다(unique_together (senior,
- * logged_date), GET은 logged_date 오름차순).
- *
- * rom_score(관절 가동범위)/completion_score(동작 완성도)는 DRF DecimalField라
- * 문자열('70.00')로 직렬화된다. 두 값은 온디바이스 AI(자세 추정)가 계산해
- * 보낸 결과를 백엔드가 저장만 한다(AI 모델 경계) - 아직 비전 파이프라인이
- * 붙지 않아 실제로는 기록이 없을 수 있고, 그 경우 GET은 빈 배열을 준다.
- * POST(기록 생성)는 비전 연동 시점의 작업이라 프론트에서 아직 호출하지 않는다
- * (AbilityHistoryScreen 주석 참고).
- */
-export interface PhysicalAbilityLogResponse {
-  log_id: number;
-  senior: number;
-  rom_score: string;
-  completion_score: string;
-  logged_date: string; // 'YYYY-MM-DD'
 }
 
 /**
