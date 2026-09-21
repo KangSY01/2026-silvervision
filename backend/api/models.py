@@ -182,6 +182,9 @@ class ExerciseSession(models.Model):
     accuracy_avg = models.DecimalField(
         max_digits=5, decimal_places=2, null=True, blank=True,
     )
+    # 1=매우 쉬웠다 ... 5=매우 힘들었다. rom_score/completion_score(관절 각도 실측)를
+    # 대체하는 자가평가 지표 - null이면 아직 평가 안 함(건너뜀 포함, 과거 세션 포함).
+    perceived_difficulty = models.PositiveSmallIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

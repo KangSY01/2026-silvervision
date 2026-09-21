@@ -293,11 +293,16 @@ class ExerciseMissionStatusUpdateSerializer(serializers.ModelSerializer):
 
 
 class ExerciseSessionSerializer(serializers.ModelSerializer):
+    perceived_difficulty = serializers.IntegerField(
+        required=False, allow_null=True,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+    )
+
     class Meta:
         model = ExerciseSession
         fields = (
             'session_id', 'mission', 'senior', 'exercise',
-            'completion_rate', 'accuracy_avg', 'created_at',
+            'completion_rate', 'accuracy_avg', 'perceived_difficulty', 'created_at',
         )
         read_only_fields = ('session_id', 'created_at')
 
@@ -341,6 +346,12 @@ class ExerciseSessionCompleteSerializer(serializers.ModelSerializer):
         max_digits=5, decimal_places=2, required=False,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
     )
+    # 체감 난이도 자가평가(1=매우 쉬웠다 ~ 5=매우 힘들었다). 완료 PATCH와 분리된
+    # 후속 PATCH로 이 필드만 단독으로도 올 수 있어 required=False + allow_null(건너뜀).
+    perceived_difficulty = serializers.IntegerField(
+        required=False, allow_null=True,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+    )
 
     # 완료 처리 결과로 열매가 실제로 지급됐는지를 응답에 함께 실어 보낸다.
     # 프론트가 "+1 수확!"을 무조건 띄우지 않으려면 이 값이 필요한데, 별도
@@ -374,7 +385,7 @@ class ExerciseSessionCompleteSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExerciseSession
         fields = (
-            'session_id', 'completion_rate', 'accuracy_avg',
+            'session_id', 'completion_rate', 'accuracy_avg', 'perceived_difficulty',
             'fruit_count', 'fruit_awarded', 'today_completed', 'daily_goal',
         )
         read_only_fields = ('session_id',)
@@ -409,7 +420,8 @@ class ExerciseSessionDetailSerializer(serializers.ModelSerializer):
         model = ExerciseSession
         fields = (
             'session_id', 'mission', 'senior', 'exercise',
-            'completion_rate', 'accuracy_avg', 'created_at', 'pose_feedbacks',
+            'completion_rate', 'accuracy_avg', 'perceived_difficulty',
+            'created_at', 'pose_feedbacks',
         )
         read_only_fields = fields
 
