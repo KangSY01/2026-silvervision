@@ -12,7 +12,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useTensorflowModel } from 'react-native-fast-tflite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
@@ -56,6 +55,7 @@ import { getDetectPosePlugin } from '@/pose/detectPosePlugin';
 import { ExercisePipeline, type ExerciseStatus } from '@/pose/exercise';
 import { FallPipeline, type FallPhase } from '@/pose/fall';
 import { mapNormalizedToScreen, type Layout } from '@/pose/screenMapping';
+import { useFallModel } from '@/pose/useFallModel';
 
 const NUM_LANDMARKS = 33;
 const TARGET_FPS = 10;
@@ -227,11 +227,9 @@ export default function ExerciseProgressScreen() {
     { videoResolution: { width: 1280, height: 960 } },
   ]);
 
-  const tflite = useTensorflowModel(
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('@/assets/models/fall_cnn_quant.tflite'),
-    [],
-  );
+  // 낙상 CNN 모델. require()를 useTensorflowModel에 직접 넘기면 릴리즈 빌드에서
+  // 조용히 실패하므로 expo-asset 경유 로더를 쓴다(pose/useFallModel.ts 주석 참고).
+  const tflite = useFallModel();
 
   const landmarksShared = useSharedValue<Landmark[]>([]);
   const layoutShared = useSharedValue<Layout>({ width: 0, height: 0 });
@@ -471,8 +469,12 @@ export default function ExerciseProgressScreen() {
   const { totalSteps, holdMs, targetPoseName, angleToleranceDeg } = exercisePipeline.getState();
 
   // 낙상 확률 배지 문구. 모델 로딩 → 첫 추론(약 3초) → 이후 300ms마다 갱신.
+  // 모델 로드 실패는 "준비 중"으로 뭉개지 않고 명시한다 — 낙상 감지가 안 도는데
+  // 사용자가 도는 줄 아는 상태가 안전 기능에서 가장 위험하다.
   const fallProbText =
-    tflite.state !== 'loaded'
+    tflite.state === 'error'
+      ? '낙상 감지 사용 불가'
+      : tflite.state === 'loading'
       ? '낙상 감지 준비 중…'
       : fallProb == null
         ? '낙상 감지 시작 중…'
@@ -569,6 +571,7 @@ export default function ExerciseProgressScreen() {
           <Text
             style={[
               styles.fallProbBadgeText,
+              tflite.state === 'error' && styles.fallProbBadgeCandidate,
               fallPhase === 'candidate' && styles.fallProbBadgeCandidate,
               fallPhase === 'fallen' && styles.fallProbBadgeFallen,
             ]}
