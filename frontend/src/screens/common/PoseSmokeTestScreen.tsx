@@ -9,7 +9,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useTensorflowModel } from 'react-native-fast-tflite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
@@ -33,6 +32,7 @@ import { useAppMode } from '../../context/AppModeContext';
 import { getDetectPosePlugin } from '@/pose/detectPosePlugin';
 import { ExercisePipeline, type ExerciseStatus } from '@/pose/exercise';
 import { FallPipeline, type FallPhase } from '@/pose/fall';
+import { useFallModel } from '@/pose/useFallModel';
 
 // Phase 4 스모크 테스트 전용 화면. VideoTensor/src/app/index.tsx를 그대로 이식했으며
 // expo-router의 <Stack.Screen> 대신 native-stack의 Screen options로 헤더를 숨긴다
@@ -169,11 +169,8 @@ export default function PoseSmokeTestScreen() {
     }
   }, [format]);
 
-  const tflite = useTensorflowModel(
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('@/assets/models/fall_cnn_quant.tflite'),
-    [],
-  );
+  // 릴리즈 빌드에서도 동작하는 expo-asset 경유 로더(pose/useFallModel.ts 주석 참고).
+  const tflite = useFallModel();
 
   const landmarksShared = useSharedValue<Landmark[]>([]);
   const layoutShared = useSharedValue<Layout>({ width: 0, height: 0 });

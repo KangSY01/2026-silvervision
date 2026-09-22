@@ -24,7 +24,7 @@ Expo HAS CHANGED — 코드를 작성하기 전에 반드시 정확한 버전별
 - `@react-navigation/native` + `@react-navigation/native-stack`, `react-native-screens`, `react-native-safe-area-context` — 네비게이션 도입 완료 (8장 참고)
 - `@react-native-async-storage/async-storage` — JWT access/refresh 토큰 저장 (`src/api/client.ts`)
 - 백엔드 통신은 `fetch` 기반 자체 클라이언트(`src/api/client.ts`) — 별도 HTTP 라이브러리 미도입
-- `react-native-vision-camera` + 커스텀 네이티브 프레임 프로세서 플러그인(`plugins/native/PoseDetectorPlugin.kt`, MediaPipe PoseLandmarker) — 카메라 프레임에서 33개 landmark 추출. `react-native-fast-tflite` — 낙상 감지 CNN(`assets/models/fall_cnn_quant.tflite`) 온디바이스 추론. `react-native-reanimated` + `react-native-worklets-core` — 프레임 프로세서 워클릿·오버레이 애니메이션. 전부 네이티브 모듈이라 Expo Go/웹에서는 동작하지 않고 `npx expo run:android` 빌드가 필요하다 (9장 참고)
+- `react-native-vision-camera` + 커스텀 네이티브 프레임 프로세서 플러그인(`plugins/native/PoseDetectorPlugin.kt`, MediaPipe PoseLandmarker) — 카메라 프레임에서 33개 landmark 추출. `react-native-fast-tflite` — 낙상 감지 CNN(`assets/models/fall_cnn_quant.tflite`) 온디바이스 추론(모델 파일은 `expo-asset`으로 캐시 디렉터리에 내려받은 `file://` 경로로 넘긴다 — 9장 `useFallModel` 참고). `react-native-reanimated` + `react-native-worklets-core` — 프레임 프로세서 워클릿·오버레이 애니메이션. 전부 네이티브 모듈이라 Expo Go/웹에서는 동작하지 않고 `npx expo run:android` 빌드가 필요하다 (9장 참고)
 - 아직 미도입: `moti`(애니메이션, 필요 시 도입 검토)
 
 ## 4. 프로젝트 구조
@@ -45,7 +45,7 @@ frontend/
     components/TabScreenLayout.tsx  # 홈/운동하기/개인정보 공통 헤더 + 하단 탭바 레이아웃 (개인정보 탭 길게 누름 → SpecialModeDialog)
     theme/theme.ts                # colors / fontSizes / fontWeights / spacing / radius / MIN_TOUCH_TARGET 토큰
     types/index.ts                # UserProfile, ActivityLevel, Workout, PoseWorkoutKey, ExerciseResult 등 공용 타입
-    pose/                         # 카메라 포즈 기능 로직 (9장) — exercise/(운동 매칭)·fall/(낙상 감지)·screenMapping.ts·detectPosePlugin.ts(MediaPipe 플러그인 지연 싱글턴)
+    pose/                         # 카메라 포즈 기능 로직 (9장) — exercise/(운동 매칭)·fall/(낙상 감지)·screenMapping.ts·detectPosePlugin.ts(MediaPipe 플러그인 지연 싱글턴)·useFallModel.ts(낙상 tflite 로더)
   plugins/                        # withPoseDetector.js(config plugin) + native/(PoseDetectorPlugin.kt, MediaPipe .task 모델)
   assets/models|poses|pose-silhouettes/  # tflite 모델·기준 포즈 JSON·실루엣 PNG
 ```
@@ -187,6 +187,7 @@ Entry (진입)
 - `src/pose/fall/`(낙상 감지) — MediaPipe landmark 스트림을 100ms 격자로 리샘플(`resampler.ts`)해 53개 특징을 뽑고(`features.ts`), `assets/models/fall_cnn_quant.tflite`로 추론한 확률을 연속 판정 상태 머신(`decision.ts`의 `FallDetector`)에 통과시켜 `idle → candidate → fallen`을 결정한다(`pipeline.ts`의 `FallPipeline`).
 - 실제 카메라 프레임 → landmark 추출은 네이티브 쪽(`react-native-vision-camera` + `plugins/native/PoseDetectorPlugin.kt`의 MediaPipe PoseLandmarker)이 담당하며, 위 두 파이프라인은 이미 추출된 landmark를 입력으로만 받는다 — 모델 학습이나 BlazePose 추론 자체를 이 폴더에 새로 구현하지 않는다.
 - **`detectPose` 플러그인 초기화는 지연 싱글턴이다**(`src/pose/detectPosePlugin.ts`의 `getDetectPosePlugin()`). `VisionCameraProxy.initFrameProcessorPlugin`은 JSI 동기 호출이라 그 안의 `PoseLandmarker`(모델 로딩 + GPU delegate 초기화) 생성 동안 JS 스레드가 멈추고, `PoseDetectorPlugin`에 `close()`가 없어 인스턴스를 여러 번 만들면 GPU 리소스가 쌓인다. 그래서 ① 이 함수를 모듈 최상단·렌더 중(`useMemo`)에서 호출하지 않는다(앱 시작 지연 / 화면 전환 정지) — `ExerciseProgressScreen`·`PoseSmokeTestScreen`은 마운트 뒤 `useEffect` 안에서 `InteractionManager.runAfterInteractions`로 호출해 `useState`에 담고, 그동안엔 "카메라 준비 중…"만 그린다. ② 인스턴스는 앱 전체에서 1회만 만들어 두 화면이 공유한다. 새 화면에서 플러그인을 쓸 때도 이 함수를 같은 방식으로 쓴다.
+- **낙상 tflite 모델은 `useTensorflowModel(require(...))`로 직접 로드하지 않는다**(`src/pose/useFallModel.ts`의 `useFallModel()` 사용). `react-native-fast-tflite@3`는 `require()` 결과의 `Image.resolveAssetSource().uri`를 네이티브 `URL(path).readBytes()`에 그대로 넘기는데, 디버그에서는 Metro의 `http://…` URL이라 되지만 릴리즈 빌드에서는 스킴 없는 Android 리소스 이름(`models_fall_cnn_quant`)이 와서 `MalformedURLException`으로 조용히 실패한다. `useFallModel`은 `expo-asset`의 `Asset.fromModule(...).downloadAsync()`로 모델을 기기 캐시에 복사해(릴리즈는 `res/raw` 리소스, 디버그는 Metro 다운로드) 얻은 `file://` `localUri`를 `loadTensorflowModel({ url })`에 넘긴다. 로드는 앱 전체에서 1회만 하고 두 화면이 공유하며, 실패 시 `state: 'error'`를 돌려주므로 화면은 이를 "준비 중"으로 뭉개지 말고 표시해야 한다(`ExerciseProgressScreen`은 "낙상 감지 사용 불가" 배지). `.task` 모델처럼 `src/main/assets`에 복사하는 방식은 fast-tflite가 `android_asset` 경로를 못 읽어 쓸 수 없다.
 
 **네이티브 빌드가 필수인 이유** (Expo Go로 대체 불가, 각각 독립적으로 막힌다):
 1. `plugins/withPoseDetector.js`(config plugin)가 `MainApplication.kt`에 프레임 프로세서 `"detectPose"`를 등록하고, `build.gradle`에 MediaPipe 의존성을 넣고, Kotlin 소스·`.task` 모델을 생성된 `android/`에 복사한다. prebuild 단계에서 네이티브 코드를 고치는 물건이라 Expo Go에서 실행될 수 없다. `app.json`의 `android.package`가 없으면 이 플러그인이 명시적으로 throw한다.

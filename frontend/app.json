@@ -38,7 +38,8 @@
       ],
       "./plugins/withPoseDetector.js",
       "@react-native-community/datetimepicker",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-asset"
     ]
   }
 }
