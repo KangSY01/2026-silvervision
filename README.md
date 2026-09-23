@@ -49,7 +49,7 @@
 | 비교 항목 | 일반 mHealth 운동 앱 | 실버비전 |
 |---|---|---|
 | 노년 특화 자세 인식 기준 | 일반 성인 기준 동작 인식 | BlazePose 기반, 노년 신체 특성(근감소증·관절 가동 범위 제한) 반영한 관절 각도 기준값(`reference_angles`) |
-| 낙상 감지 | 미제공 | 온디바이스 관절 시계열 → 경량 1D-CNN(`fall_cnn_quant.tflite`) 실시간 낙상 감지(재현율 96.8%, 오탐율 1.1%, 10FPS — 4.7절 참고). 판정 로직이 앱(`frontend/src/pose/fall/`)에 내장돼 직접 동작. 무활동 감지는 로그를 기록할 기기 쪽 코드가 없어 파이프라인 자체가 미연동(4.6절) |
+| 낙상 감지 | 미제공 | 온디바이스 관절 시계열 → 경량 1D-CNN(`fall_cnn_quant.tflite`) 실시간 낙상 감지(재현율 96.8%, 오탐율 1.1%, 10FPS — 4.9절 참고). 판정 로직이 앱(`frontend/src/pose/fall/`)에 내장돼 직접 동작. 무활동 감지는 로그를 기록할 기기 쪽 코드가 없어 파이프라인 자체가 미연동(4.8절) |
 | 응급 대응 통합 | 별도 미제공(운동 기능과 분리) | 감지 → 1차 확인 → 보호자 알림(SMS) → 상황 종료까지 하나의 상태 머신으로 통합 |
 | 보호자 연동 | 미제공 또는 단순 공유 | 다중 피보호자 등록·관리, 활동·응급 이력 실시간 조회 |
 | 별도 하드웨어 필요 여부 | 앱 단독(웨어러블 연동형도 존재) | 불필요(스마트폰 카메라만으로 자세 추정 + 응급 감지) |
@@ -64,7 +64,11 @@
 
 ## 3. 시스템 설계
 
-### 3.1 기술 스택
+### 3.1 시스템 구성도
+
+자세 추정 파이프라인은 `[카메라 프레임 획득] → [MediaPipe PoseLandmarker Keypoint 추출] → [관절 각도 계산 → 기준 포즈 시퀀스 매칭]` 과 `[Keypoint 시계열 → 경량 1D-CNN → 낙상 감지]` 두 갈래로 분기되는 구조이며, 모델 학습 데이터는 ETRI-Activity3D를 사용합니다. 관절 추출부터 두 갈래의 판정까지가 이번 vision 통합으로 앱(`frontend/src/pose/`, `frontend/plugins/native/`)에 들어왔고, 모델 학습·추론 개발만 별도 `VideoTensor` 트랙에 남아 있습니다. 무활동 감지는 `activity_log`(기기 활동 로그) 테이블과 조회 API만 있을 뿐, 로그를 기록하는 기기 쪽 코드가 없어 파이프라인 전체가 미연동 상태입니다(4.8절 참고).
+
+### 3.2 사용 기술
 
 | 영역 | 기술 | 버전 | 비고 |
 |---|---|---|---|
@@ -86,20 +90,108 @@
 | 알림(응급) | 솔라피(Solapi) SMS | `solapi` 5.0.3 | `notified` 전환 시 연동 보호자 휴대폰으로 실제 SMS 발송(`backend/api/sms.py`). 키(`SOLAPI_*`)는 `.env`에서 읽고, 미설정 시 발송을 건너뛴다(테스트/CI). 발송 실패는 삼키고 `emergency_notification` 이력은 그대로 남긴다. `/notify/` 재호출은 멱등(재발송 없음) |
 | 알림(운동) | expo-notifications / @react-native-community/datetimepicker | ~55.0.27 / 8.6.0 | 서버 발송이 아닌 **기기 로컬** 매일 반복 알림. `ProfileScreen`에서 시각 설정 → `AsyncStorage`에 저장 + OS에 daily trigger 예약(`frontend/src/notifications/exerciseReminder.ts`). 백엔드 연동 없음(`exercise_mission.scheduled_at`과는 별개) |
 
-### 3.2 시스템 구성도
+## 4. 개발 결과
 
-자세 추정 파이프라인은 `[카메라 프레임 획득] → [MediaPipe PoseLandmarker Keypoint 추출] → [관절 각도 계산 → 기준 포즈 시퀀스 매칭]` 과 `[Keypoint 시계열 → 경량 1D-CNN → 낙상 감지]` 두 갈래로 분기되는 구조이며, 모델 학습 데이터는 ETRI-Activity3D를 사용합니다. 관절 추출부터 두 갈래의 판정까지가 이번 vision 통합으로 앱(`frontend/src/pose/`, `frontend/plugins/native/`)에 들어왔고, 모델 학습·추론 개발만 별도 `VideoTensor` 트랙에 남아 있습니다. 무활동 감지는 `activity_log`(기기 활동 로그) 테이블과 조회 API만 있을 뿐, 로그를 기록하는 기기 쪽 코드가 없어 파이프라인 전체가 미연동 상태입니다(4.6절 참고).
+### 4.1 전체 시스템 흐름도
 
 전체 흐름은 다음과 같습니다.
 
 - **프론트엔드(Expo/React Native)**가 카메라 프레임을 획득하고, 온디바이스 네이티브 프레임 프로세서(`react-native-vision-camera` + MediaPipe PoseLandmarker, `frontend/plugins/native/`)가 33개 관절 좌표를 추출합니다. 그 좌표를 `frontend/src/pose/`의 판정 로직이 받아 (1) 운동 중에는 기준 포즈 시퀀스(`WORKOUT_POSE_SEQUENCES`)와 매칭해 단계 진행을 집계하고, (2) 상시로는 `fall_cnn_quant.tflite`로 낙상 여부를 분류합니다. (BlazePose 모델·CNN 학습 자체는 별도 트랙.)
 - 운동 결과(`completion_rate`/`accuracy_avg`)와 응급 이벤트(`event_type`/`detection_source`)는 클라이언트가 계산까지 마친 값을 **백엔드(Django REST API)**로 전송하며, 백엔드는 이 값을 검증·저장·조회하는 역할만 담당합니다(AI 모델 경계). 관절별 편차(`pose_feedback`)는 현재 포즈 매처가 통과/실패만 반환해 실측값이 없어 프론트에서 전송하지 않습니다(엔드포인트는 대기 상태로 보존).
-- 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이됩니다. 낙상이 확정되면 시니어 화면에 **1차 확인 UI**(`EmergencyCheckOverlay`, 알람+진동+전체화면 팝업)가 뜨고 `first_check`로 전환합니다. 시니어가 "괜찮아요"를 누르면 `false_alarm`으로, "도움이 필요해요"를 누르거나 30초간 무응답이면 자동으로 `notified`로 전환되며 보호자 앱에 알림 레코드가 남고 연동 보호자 휴대폰으로 솔라피(Solapi) SMS가 발송됩니다(`SOLAPI_*` 미설정 시 발송 스킵, `/notify/` 재호출은 멱등). 실제 앱 흐름은 여기까지이며, 카메라 접근 권한 부여(`camera_access_grant`)는 백엔드 엔드포인트만 존재하고 프론트엔드에서 호출하지 않아 현재 트리거되지 않습니다(4.6절 참고).
+- 응급 이벤트는 백엔드의 상태 머신(`detected → first_check → (false_alarm | notified) → resolved`)을 따라 전이됩니다. 낙상이 확정되면 시니어 화면에 **1차 확인 UI**(`EmergencyCheckOverlay`, 알람+진동+전체화면 팝업)가 뜨고 `first_check`로 전환합니다. 시니어가 "괜찮아요"를 누르면 `false_alarm`으로, "도움이 필요해요"를 누르거나 30초간 무응답이면 자동으로 `notified`로 전환되며 보호자 앱에 알림 레코드가 남고 연동 보호자 휴대폰으로 솔라피(Solapi) SMS가 발송됩니다(`SOLAPI_*` 미설정 시 발송 스킵, `/notify/` 재호출은 멱등). 실제 앱 흐름은 여기까지이며, 카메라 접근 권한 부여(`camera_access_grant`)는 백엔드 엔드포인트만 존재하고 프론트엔드에서 호출하지 않아 현재 트리거되지 않습니다(4.8절 참고).
 - 보호자 앱은 매핑된 피보호자의 프로필·운동 이력·응급 이력을 조회 전용으로 볼 수 있고, 시니어 본인만 자신의 데이터를 쓸 수 있습니다(IDOR 방지 권한 설계).
 
-## 4. 개발 결과
+### 4.2 기능 설명 및 주요 기능 명세서 (API 엔드포인트)
 
-### 4.1 DB ERD
+`backend/api/urls.py` 기준 전체 **24개 엔드포인트**입니다(전부 `/api/v1/` 하위).
+
+| 영역 | Method | 경로 | 설명 | 권한 |
+|---|---|---|---|---|
+| 인증 | POST | `auth/senior/register/` | 시니어 회원가입 | AllowAny |
+| 인증 | POST | `auth/senior/login/` | 시니어 로그인 | AllowAny |
+| 인증 | POST | `auth/guardian/register/` | 보호자 회원가입 | AllowAny |
+| 인증 | POST | `auth/guardian/login/` | 보호자 로그인 | AllowAny |
+| 인증 | POST | `auth/token/refresh/` | access token 재발급 | AllowAny |
+| 인증 | POST | `auth/logout/` | refresh token 무효화(blacklist) | AllowAny |
+| 계정 | GET·PUT·PATCH | `senior/{senior_id}/` | 시니어 프로필 조회/수정. 조회 응답에 `today_completed`/`daily_goal`(오늘 목표 진행도 — 홈 건강 나무) 포함 | GET: 본인·매핑된 보호자 / 쓰기: 본인 |
+| 계정 | GET·PUT·PATCH | `guardian/{guardian_id}/` | 보호자 프로필 조회/수정 | 본인 |
+| 계정 | GET·POST | `guardian/{guardian_id}/seniors/` | 매핑 목록 조회 / 피보호자 등록 | 본인 |
+| 계정 | DELETE | `guardian/{guardian_id}/seniors/{senior_id}/` | 매핑 해제 | 본인 |
+| 운동 | GET | `exercises/`, `exercises/{exercise_id}/` | 운동 콘텐츠 목록/상세. 응답에 `pose_workout_key`(카메라 판정 시퀀스 태그, 마이그레이션 `0007`) 포함 — 프론트가 이 값으로 포즈 파이프라인을 고르고 값이 없는 운동은 목록에서 제외 | 로그인 사용자 |
+| 운동 | GET·POST | `senior/{senior_id}/missions/` | 운동 미션 목록/생성 | 본인 |
+| 운동 | PATCH | `senior/{senior_id}/missions/{mission_id}/` | 미션 상태 변경 | 본인 |
+| 기록 | GET·POST | `senior/{senior_id}/sessions/` | 운동 세션 목록 / 시작 | GET: 본인·매핑된 보호자 / POST: 본인 |
+| 기록 | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` | 세션 상세(피드백 nested) / 완료 처리·체감 난이도 자가평가. PATCH는 `completion_rate`/`accuracy_avg`/`perceived_difficulty`(1~5, 2026-09-21 추가) 모두 optional이라 완료 PATCH와 분리된 후속 PATCH로도 온다. 완료 PATCH 응답에 `fruit_awarded`/`fruit_count`/`today_completed`/`daily_goal`(열매 지급 여부·하루 목표 진행도) 포함 | GET: 본인·매핑된 보호자 / PATCH: 본인 |
+| 기록 | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` | 관절별 편차(`PoseFeedback.deviation`) bulk 저장 <sup>[†](#dagger)</sup> | 본인 |
+| 기록 | GET·POST | `senior/{senior_id}/activity-log/` | 기기 활동 로그 조회/기록 | GET: 본인·매핑된 보호자 / POST: 본인 |
+| 기록 | GET·POST | `senior/{senior_id}/ability-log/` | 장기 신체 능력(일별) 조회/upsert. POST는 구현됐으나 프론트 호출자 없음(비전 실측 파생 지표 대기, 2026-09-21부터 `AbilityHistoryScreen`도 `perceived_difficulty` 자가평가로 전환해 GET도 더 이상 호출하지 않음) <sup>[†](#dagger)</sup> | 본인 |
+| 응급 | GET·POST | `emergency/` | 응급 이벤트 목록 조회 / 생성 | GET: 본인·매핑된 보호자 / POST: 본인 |
+| 응급 | GET·PATCH | `emergency/{event_id}/` | 이벤트 상세(알림·카메라권한 nested) / 상태 전이 | 본인·매핑된 보호자 |
+| 응급 | POST | `emergency/{event_id}/notify/` | 보호자 알림 레코드 생성 + SMS 발송. 이미 `notified`면 재발송 없이 기존 이력만 반환(재호출 멱등) | 본인·매핑된 보호자 |
+| 응급 | POST·DELETE | `emergency/{event_id}/camera-grant/` | 카메라 접근 권한 부여/즉시 만료. 구현·테스트는 완료됐으나 **프론트엔드에서 호출하지 않아 현재 앱 흐름에서는 트리거되지 않음**(4.8절) | 본인·매핑된 보호자 |
+| 게임화 | GET | `senior/{senior_id}/ranking/` | 전국/지역 최신 랭킹 스냅샷 조회 | 본인 |
+
+<a id="dagger"></a>**†  휴면 엔드포인트**: `feedback/`는 예전에 `ExerciseFeedbackScreen`이 placeholder 편차값을 보냈으나, 포즈 매처(`src/pose/exercise/matcher.ts`)가 통과/실패(boolean)만 반환해 실측 관절 편차가 없어 호출을 제거했습니다. 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값(단계 통과율)입니다. `ability-log/`(관절 가동범위·동작 완성도)도 같은 이유로 실측 소스가 없어 프론트가 호출하지 않으며, 2026-09-21에 `AbilityHistoryScreen`을 아예 체감 난이도 자가평가(`ExerciseSession.perceived_difficulty`, 1~5, 사용자 입력이라 matcher 확장과 무관하게 이미 실측 가능) 기반으로 교체해 이 엔드포인트에 대한 프론트 의존을 없앴습니다. `feedback/`·`accuracy_avg`는 matcher가 각도 편차를 함께 반환하도록 확장되면 다시 연결될 여지가 남아 있습니다.
+
+전수 감사(2026-09-09) 결과 아래 5개도 같은 패턴(백엔드 구현·프론트 미호출)으로 추가 확인됐습니다: `GET exercises/{id}/`(목록·상세 시리얼라이저가 동일해 상세 조회 이점이 없음), `GET senior/{id}/missions/`·`PATCH .../missions/{mission_id}/`(미션 목록 화면이 없고 완료 집계는 `ExerciseSession.completion_rate`만으로 함. 이 `PATCH` 엔드포인트 자체는 여전히 프론트에서 호출되지 않지만, `mission.status`는 세션 완료 시점에 백엔드가 직접 `completed`로 갱신하도록 2026-09-09에 수정됨), `GET senior/{id}/sessions/{session_id}/`(세션 상세의 `pose_feedbacks` nested 응답에 도달하는 화면 없음), `POST senior/{id}/activity-log/`(로그를 실제로 기록할 시니어 기기 쪽 코드가 없어 무활동 감지 파이프라인 전체가 미연동). 이 중 `GET exercises/{id}/`·`GET·PATCH .../missions/*`는 백엔드 테스트도 없습니다(구현만 됨). 위 모든 엔드포인트·시리얼라이저는 그대로 남아 있습니다.
+
+**미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 95건 통과).
+
+### 4.3 디렉토리 구조
+
+```
+silvervision/
+├── AGENTS.md              # 모노레포 루트 Claude Code 참고 문서
+├── CLAUDE.md               # 루트 AGENTS.md를 포함한 Claude Code 진입 문서
+├── CONTRIBUTING.md         # 전체 협업 가이드
+├── README.md
+├── compose.yaml            # MySQL 8.0 개발용 컨테이너 (charset utf8mb4, 127.0.0.1 바인딩)
+├── docker/mysql/init/      # 컨테이너 최초 기동 시 실행되는 초기화 SQL (test_silvervision 권한 부여 — manage.py test 용)
+├── backend/                 # Django REST API 서버
+│   ├── AGENTS.md
+│   ├── DB_SCHEMA.md         # 13개 테이블 스키마 문서
+│   ├── claude-security-guidance.md
+│   ├── api/                 # models.py / views.py / serializers.py / urls.py / permissions.py / authentication.py / management/commands/(seed_*) 등
+│   ├── config/               # Django 프로젝트 설정 (settings.py, config/urls.py)
+│   ├── manage.py
+│   └── requirements.txt
+└── frontend/                 # Expo(React Native) 앱 — Expo Go 불가, 개발 빌드 필요
+    ├── AGENTS.md
+    ├── App.tsx               # 진입점: SafeAreaProvider → AppStateProvider → NavigationContainer
+    ├── app.json / babel.config.js / metro.config.js   # config plugins·worklets/reanimated 프리셋·.tflite 에셋 등록
+    ├── android/              # prebuild 산출물 — 저장소에 커밋되지 않음(clone 후 최초 1회 prebuild 필요)
+    ├── plugins/              # withPoseDetector.js(config plugin) + native/(PoseDetectorPlugin.kt, pose_landmarker_lite.task)
+    ├── assets/               # models/(fall_cnn_quant.tflite) · poses/(기준 포즈 JSON) · pose-silhouettes/(PNG)
+    ├── scripts/              # convert-pose-json.mjs 등 포즈 에셋 변환 스크립트
+    ├── docs/ASSEMBLY.md      # src/pose 수동 포팅 절차·동기화 체크리스트
+    ├── src/
+    │   ├── api/client.ts      # 공통 API 클라이언트(fetch 래퍼, JWT 저장/첨부/재발급)
+    │   ├── components/        # EmergencyCheckOverlay.tsx(1차 확인 UI) · TabScreenLayout 등 공용 컴포넌트
+    │   ├── context/AppStateContext.tsx
+    │   ├── navigation/types.ts
+    │   ├── labels.ts          # 백엔드 enum ↔ 화면 라벨 공용 매핑
+    │   ├── notifications/     # exerciseReminder.ts — 운동 알림 시각 설정 (기기 로컬, expo-notifications)
+    │   ├── pose/              # exercise/(운동 자세 매칭)·fall/(낙상 감지) 온디바이스 판정 로직 + screenMapping.ts(좌표 변환) + detectPosePlugin.ts(MediaPipe 플러그인 지연 싱글턴) — frontend/AGENTS.md 9장
+    │   ├── screens/            # common/ senior/ guardian/ — 4.6절 참고
+    │   ├── theme/theme.ts
+    │   └── types/
+    └── tsconfig.json          # @/* → ./src/* , @/assets/* → ./assets/* 경로 별칭
+```
+
+### 4.4 산업체 멘토링 의견 및 반영 사항
+
+산학협력 멘토(휴이노 CTO 정성훈)가 2026.08.06 서면자문으로 중간보고서에 남긴 의견과, 그에 대한 대응은 아래와 같습니다.
+
+| 지적 사항 | 반영 사항 |
+|---|---|
+| 노년 특화·치매 예방 목표의 구체화, 운동-인지기능 개선 간 검증방법 제시 필요 | 1.1절에 치매역학조사·Lancet Commission 등 근거 문헌을 인용하고, 2.2절에 근감소증·관절가동범위 제한을 반영한 관절 각도 기준값(`reference_angles`)으로 "노년 특화"의 구체적 근거를 제시함. 다만 운동-인지기능 개선을 직접 검증하는 임상적 방법론은 과제 범위를 벗어나 도입하지 못했으며, 선행 연구 인용으로 대체함(한계로 인정, 8장 참고문헌 [1][4][5]) |
+| 스마트폰 카메라보다 홈캠 등 설치형 장비 연동이 사용성 측면에서 유리할 것으로 제안 | 채택하지 않음. 웨어러블·별도 장비 없이 스마트폰 단일 기기로 동작하는 것이 본 과제의 핵심 차별점이자 경제적 보급 가능성의 근거(2.2·2.3절)이므로 기존 방향을 유지함 |
+| 요구사항 변경 전/후를 표 형태로 제시하면 가독성이 좋겠음 | 4.7절(중간보고서 대비 요구사항 변경사항)로 반영 |
+| 노년 특화·치매 예방 목표 설정 근거가 중간보고서에서 확인되지 않음 | 본 README 1.1절에 명시적으로 포함 |
+| 운동가이드/테스트 화면 부재로 성능 확인 어려움, 자세탐지·분류 미구현 상태였음 | 비전 통합을 통해 온디바이스 자세 추정·낙상 분류 파이프라인 구현 완료(3.1·4.1절), 실기기 시연 가능 |
+| 핵심 프로세스(자세탐지·분류)의 평가지표, 시험환경·방법, 목표성능 제시 필요 | 4.9절(낙상 감지 모델 성능)에 실측 결과(재현율 96.8%, 오탐율 1.1%, 10FPS) 제시 |
+
+### 4.5 DB ERD
 
 `backend/DB_SCHEMA.md` 및 `backend/api/models.py` 기준, 13개 테이블입니다.
 
@@ -244,84 +336,7 @@ erDiagram
 
 > `token_blacklist` 앱(simplejwt 로그아웃용)이 `OutstandingToken`/`BlacklistedToken` 테이블 2개를 추가로 관리하지만, 라이브러리 소유 테이블이라 위 ERD(13개 테이블)에는 포함하지 않았습니다.
 
-### 4.2 기능 명세서 (API 엔드포인트)
-
-`backend/api/urls.py` 기준 전체 **24개 엔드포인트**입니다(전부 `/api/v1/` 하위).
-
-| 영역 | Method | 경로 | 설명 | 권한 |
-|---|---|---|---|---|
-| 인증 | POST | `auth/senior/register/` | 시니어 회원가입 | AllowAny |
-| 인증 | POST | `auth/senior/login/` | 시니어 로그인 | AllowAny |
-| 인증 | POST | `auth/guardian/register/` | 보호자 회원가입 | AllowAny |
-| 인증 | POST | `auth/guardian/login/` | 보호자 로그인 | AllowAny |
-| 인증 | POST | `auth/token/refresh/` | access token 재발급 | AllowAny |
-| 인증 | POST | `auth/logout/` | refresh token 무효화(blacklist) | AllowAny |
-| 계정 | GET·PUT·PATCH | `senior/{senior_id}/` | 시니어 프로필 조회/수정. 조회 응답에 `today_completed`/`daily_goal`(오늘 목표 진행도 — 홈 건강 나무) 포함 | GET: 본인·매핑된 보호자 / 쓰기: 본인 |
-| 계정 | GET·PUT·PATCH | `guardian/{guardian_id}/` | 보호자 프로필 조회/수정 | 본인 |
-| 계정 | GET·POST | `guardian/{guardian_id}/seniors/` | 매핑 목록 조회 / 피보호자 등록 | 본인 |
-| 계정 | DELETE | `guardian/{guardian_id}/seniors/{senior_id}/` | 매핑 해제 | 본인 |
-| 운동 | GET | `exercises/`, `exercises/{exercise_id}/` | 운동 콘텐츠 목록/상세. 응답에 `pose_workout_key`(카메라 판정 시퀀스 태그, 마이그레이션 `0007`) 포함 — 프론트가 이 값으로 포즈 파이프라인을 고르고 값이 없는 운동은 목록에서 제외 | 로그인 사용자 |
-| 운동 | GET·POST | `senior/{senior_id}/missions/` | 운동 미션 목록/생성 | 본인 |
-| 운동 | PATCH | `senior/{senior_id}/missions/{mission_id}/` | 미션 상태 변경 | 본인 |
-| 기록 | GET·POST | `senior/{senior_id}/sessions/` | 운동 세션 목록 / 시작 | GET: 본인·매핑된 보호자 / POST: 본인 |
-| 기록 | GET·PATCH | `senior/{senior_id}/sessions/{session_id}/` | 세션 상세(피드백 nested) / 완료 처리·체감 난이도 자가평가. PATCH는 `completion_rate`/`accuracy_avg`/`perceived_difficulty`(1~5, 2026-09-21 추가) 모두 optional이라 완료 PATCH와 분리된 후속 PATCH로도 온다. 완료 PATCH 응답에 `fruit_awarded`/`fruit_count`/`today_completed`/`daily_goal`(열매 지급 여부·하루 목표 진행도) 포함 | GET: 본인·매핑된 보호자 / PATCH: 본인 |
-| 기록 | POST | `senior/{senior_id}/sessions/{session_id}/feedback/` | 관절별 편차(`PoseFeedback.deviation`) bulk 저장 <sup>[†](#dagger)</sup> | 본인 |
-| 기록 | GET·POST | `senior/{senior_id}/activity-log/` | 기기 활동 로그 조회/기록 | GET: 본인·매핑된 보호자 / POST: 본인 |
-| 기록 | GET·POST | `senior/{senior_id}/ability-log/` | 장기 신체 능력(일별) 조회/upsert. POST는 구현됐으나 프론트 호출자 없음(비전 실측 파생 지표 대기, 2026-09-21부터 `AbilityHistoryScreen`도 `perceived_difficulty` 자가평가로 전환해 GET도 더 이상 호출하지 않음) <sup>[†](#dagger)</sup> | 본인 |
-| 응급 | GET·POST | `emergency/` | 응급 이벤트 목록 조회 / 생성 | GET: 본인·매핑된 보호자 / POST: 본인 |
-| 응급 | GET·PATCH | `emergency/{event_id}/` | 이벤트 상세(알림·카메라권한 nested) / 상태 전이 | 본인·매핑된 보호자 |
-| 응급 | POST | `emergency/{event_id}/notify/` | 보호자 알림 레코드 생성 + SMS 발송. 이미 `notified`면 재발송 없이 기존 이력만 반환(재호출 멱등) | 본인·매핑된 보호자 |
-| 응급 | POST·DELETE | `emergency/{event_id}/camera-grant/` | 카메라 접근 권한 부여/즉시 만료. 구현·테스트는 완료됐으나 **프론트엔드에서 호출하지 않아 현재 앱 흐름에서는 트리거되지 않음**(4.6절) | 본인·매핑된 보호자 |
-| 게임화 | GET | `senior/{senior_id}/ranking/` | 전국/지역 최신 랭킹 스냅샷 조회 | 본인 |
-
-<a id="dagger"></a>**†  휴면 엔드포인트**: `feedback/`는 예전에 `ExerciseFeedbackScreen`이 placeholder 편차값을 보냈으나, 포즈 매처(`src/pose/exercise/matcher.ts`)가 통과/실패(boolean)만 반환해 실측 관절 편차가 없어 호출을 제거했습니다. 같은 이유로 `accuracy_avg`도 현재 `completion_rate`와 같은 값(단계 통과율)입니다. `ability-log/`(관절 가동범위·동작 완성도)도 같은 이유로 실측 소스가 없어 프론트가 호출하지 않으며, 2026-09-21에 `AbilityHistoryScreen`을 아예 체감 난이도 자가평가(`ExerciseSession.perceived_difficulty`, 1~5, 사용자 입력이라 matcher 확장과 무관하게 이미 실측 가능) 기반으로 교체해 이 엔드포인트에 대한 프론트 의존을 없앴습니다. `feedback/`·`accuracy_avg`는 matcher가 각도 편차를 함께 반환하도록 확장되면 다시 연결될 여지가 남아 있습니다.
-
-전수 감사(2026-09-09) 결과 아래 5개도 같은 패턴(백엔드 구현·프론트 미호출)으로 추가 확인됐습니다: `GET exercises/{id}/`(목록·상세 시리얼라이저가 동일해 상세 조회 이점이 없음), `GET senior/{id}/missions/`·`PATCH .../missions/{mission_id}/`(미션 목록 화면이 없고 완료 집계는 `ExerciseSession.completion_rate`만으로 함. 이 `PATCH` 엔드포인트 자체는 여전히 프론트에서 호출되지 않지만, `mission.status`는 세션 완료 시점에 백엔드가 직접 `completed`로 갱신하도록 2026-09-09에 수정됨), `GET senior/{id}/sessions/{session_id}/`(세션 상세의 `pose_feedbacks` nested 응답에 도달하는 화면 없음), `POST senior/{id}/activity-log/`(로그를 실제로 기록할 시니어 기기 쪽 코드가 없어 무활동 감지 파이프라인 전체가 미연동). 이 중 `GET exercises/{id}/`·`GET·PATCH .../missions/*`는 백엔드 테스트도 없습니다(구현만 됨). 위 모든 엔드포인트·시리얼라이저는 그대로 남아 있습니다.
-
-**미구현(계획됨)**: 비밀번호 변경/재설정, 매핑 등록 전 시니어 검색 API. 그 외 스키마 13개 테이블에 직결되는 CRUD는 전부 구현·테스트 완료(`backend/api/tests.py` 95건 통과).
-
-### 4.3 디렉토리 구조
-
-```
-silvervision/
-├── AGENTS.md              # 모노레포 루트 Claude Code 참고 문서
-├── CLAUDE.md               # 루트 AGENTS.md를 포함한 Claude Code 진입 문서
-├── CONTRIBUTING.md         # 전체 협업 가이드
-├── README.md
-├── compose.yaml            # MySQL 8.0 개발용 컨테이너 (charset utf8mb4, 127.0.0.1 바인딩)
-├── docker/mysql/init/      # 컨테이너 최초 기동 시 실행되는 초기화 SQL (test_silvervision 권한 부여 — manage.py test 용)
-├── backend/                 # Django REST API 서버
-│   ├── AGENTS.md
-│   ├── DB_SCHEMA.md         # 13개 테이블 스키마 문서
-│   ├── claude-security-guidance.md
-│   ├── api/                 # models.py / views.py / serializers.py / urls.py / permissions.py / authentication.py / management/commands/(seed_*) 등
-│   ├── config/               # Django 프로젝트 설정 (settings.py, config/urls.py)
-│   ├── manage.py
-│   └── requirements.txt
-└── frontend/                 # Expo(React Native) 앱 — Expo Go 불가, 개발 빌드 필요
-    ├── AGENTS.md
-    ├── App.tsx               # 진입점: SafeAreaProvider → AppStateProvider → NavigationContainer
-    ├── app.json / babel.config.js / metro.config.js   # config plugins·worklets/reanimated 프리셋·.tflite 에셋 등록
-    ├── android/              # prebuild 산출물 — 저장소에 커밋되지 않음(clone 후 최초 1회 prebuild 필요)
-    ├── plugins/              # withPoseDetector.js(config plugin) + native/(PoseDetectorPlugin.kt, pose_landmarker_lite.task)
-    ├── assets/               # models/(fall_cnn_quant.tflite) · poses/(기준 포즈 JSON) · pose-silhouettes/(PNG)
-    ├── scripts/              # convert-pose-json.mjs 등 포즈 에셋 변환 스크립트
-    ├── docs/ASSEMBLY.md      # src/pose 수동 포팅 절차·동기화 체크리스트
-    ├── src/
-    │   ├── api/client.ts      # 공통 API 클라이언트(fetch 래퍼, JWT 저장/첨부/재발급)
-    │   ├── components/        # EmergencyCheckOverlay.tsx(1차 확인 UI) · TabScreenLayout 등 공용 컴포넌트
-    │   ├── context/AppStateContext.tsx
-    │   ├── navigation/types.ts
-    │   ├── labels.ts          # 백엔드 enum ↔ 화면 라벨 공용 매핑
-    │   ├── notifications/     # exerciseReminder.ts — 운동 알림 시각 설정 (기기 로컬, expo-notifications)
-    │   ├── pose/              # exercise/(운동 자세 매칭)·fall/(낙상 감지) 온디바이스 판정 로직 + screenMapping.ts(좌표 변환) + detectPosePlugin.ts(MediaPipe 플러그인 지연 싱글턴) — frontend/AGENTS.md 9장
-    │   ├── screens/            # common/ senior/ guardian/ — 4.4절 참고
-    │   ├── theme/theme.ts
-    │   └── types/
-    └── tsconfig.json          # @/* → ./src/* , @/assets/* → ./assets/* 경로 별칭
-```
-
-### 4.4 프론트엔드 화면 목록
+### 4.6 프론트엔드 화면 목록
 
 `frontend/src/screens/{common,senior,guardian}/` 기준 **제품 화면 18개**(`AbilityHistoryScreen` 포함)이며, **전 화면 실제 백엔드 API 연동 완료** 상태입니다. 그 외 개발 전용 `PoseSmokeTestScreen`이 하나 더 있으나 제품 화면 수(18)에는 넣지 않습니다 — 카메라 파이프라인만 단독 검증하는 화면으로 `__DEV__` 빌드에서만 `EntryScreen` 하단 링크로 노출됩니다.
 
@@ -346,7 +361,7 @@ silvervision/
 | 보호자 | AlertDetailScreen | ✅ 완료 | 응급 상세 조회(`detection_source` 실값 표시) + 상태 전이(PATCH). **상세 분석 시각화(타임라인·가속도값·낙상지수·스켈레톤 리플레이)는 전부 비전팀 몫이라 목업 유지** — 실측 센서/영상 데이터 없음 |
 | 보호자 | GuardianProfileScreen | ✅ 완료 | 프로필 조회/수정, 로그아웃, 피보호자 목록 |
 
-### 4.5 중간보고서 대비 요구사항 변경사항
+### 4.7 중간보고서 대비 요구사항 변경사항
 
 중간보고서(2026년 6월) 대비 아래와 같이 요구사항이 변경되었습니다.
 
@@ -358,7 +373,7 @@ silvervision/
 - **운동 알림**: `exercise_mission.scheduled_at` 기반 설계 → **기기 로컬 매일 반복 알림**으로 단순화(서버 연동 없음)
 - **응급 1차 확인**: 백엔드 상태 머신만 설계 → **프론트 UI(`EmergencyCheckOverlay`) 구현 완료**(알람+진동+팝업, 응답에 따라 `false_alarm`/`notified` 전이)
 
-### 4.6 다음 단계 및 알려진 한계
+### 4.8 다음 단계 및 알려진 한계
 
 **다음 단계(미착수, 향후 과제)**
 
@@ -372,9 +387,9 @@ silvervision/
 **알려진 한계**
 
 - 운동 알림(로컬)은 기기 전원이 꺼진 동안 울리지 않고, 재부팅 후 앱을 안 열면 재예약 안 됨. 제조사 배터리 최적화로 지연 가능
-- 낙상 판정 로직은 `VideoTensor` 프로토타입에서 이식된 것으로, 재학습·정확도 개선은 별도 트랙에서 진행 중(실측 성능은 4.7절)
+- 낙상 판정 로직은 `VideoTensor` 프로토타입에서 이식된 것으로, 재학습·정확도 개선은 별도 트랙에서 진행 중(실측 성능은 4.9절)
 
-### 4.7 낙상 감지 모델 성능
+### 4.9 낙상 감지 모델 성능
 
 `VideoTensor` 트랙(별도 저장소)에서 ETRI-Activity3D 기반으로 측정한 낙상 분류기(`fall_cnn_quant.tflite`) 실측 성능입니다. 지도교수님 피드백은 테스트 이후 추가 고도화였으나, 남은 일정을 감안해 이번 보고에서는 고도화 대신 실측치를 그대로 보고합니다.
 
@@ -383,7 +398,7 @@ silvervision/
 | 재현율(Recall) | 96.8% | 실제 낙상을 낙상으로 판정한 비율 |
 | 오탐율(False Positive Rate) | 1.1% | 낙상이 아닌 상황을 낙상으로 잘못 판정한 비율 |
 | 처리 속도 | 초당 10프레임(FPS) | 온디바이스(앱 내) 실시간 추론 기준 |
-| 무활동 감지 | 미포함 | 이 분류기는 낙상만 판별하며, 무활동은 4.6절 "다음 단계" 참고 |
+| 무활동 감지 | 미포함 | 이 분류기는 낙상만 판별하며, 무활동은 4.8절 "다음 단계" 참고 |
 
 ## 5. 설치 및 실행 방법
 
@@ -529,11 +544,19 @@ adb reverse tcp:8000 tcp:8000
 
 ## 6. 소개자료 및 시연 영상
 
+### 6.1 프로젝트 소개 자료
+
+추후 추가 예정
+
+### 6.2 시연 영상
+
 추후 추가 예정
 
 ## 7. 팀 구성
 
 팀명: 실버비전 · 지도교수: 감진규
+
+### 7.1 팀원별 소개 및 역할 분담
 
 | 이름 | 이메일 | 주요 역할 | 세부 담당 |
 |---|---|---|---|
@@ -543,6 +566,20 @@ adb reverse tcp:8000 tcp:8000
 
 > **역할 변경 이력**: 착수보고서 원안에는 강서영이 AI 모델(낙상 감지 알고리즘)도 겸임하는 것으로, 주은택은 "백엔드 + AI 모델" 공동 담당으로 명시되어 있었습니다. 중간보고서 단계에서 비전(Computer Vision) 파트를 주은택이 전담하는 것으로 역할이 재조정되었습니다. AI 모델 **학습·추론 개발**은 여전히 `frontend/`·`backend/` 밖 `VideoTensor` 트랙에서 진행되지만, 실기기 검증을 마친 **자세 매칭·낙상 감지 판정 로직**은 사람이 직접 `frontend/src/pose/`로 포팅해 이번 병합으로 앱에 통합되었습니다(절차: `frontend/docs/ASSEMBLY.md`).
 
+### 7.2 팀원별 참여 후기
+
+강서영(팀장, 백엔드): 팀장으로 프로젝트를 이끌면서 책임감도 컸지만, 묵묵히 따라와 준 팀원들 덕분에 여기까지 올 수 있었습니다. 특히 낙상 감지 모델 학습에 쓸 노년층 동작 데이터셋을 구하는 과정이 예상보다 훨씬 어려워서, 데이터 하나 모으는 게 코드 짜는 것보다 힘들다는 걸 실감했습니다. 대신 백엔드 API부터 응급 알림, SMS 연동까지 여러 기능을 직접 구현해보면서 배운 것도 많고 재밌었습니다. 팀원들에게 고맙습니다.
+
+박소영(프론트엔드): 작성 예정
+
+주은택(AI/비전): 작성 예정
+
 ## 8. 참고문헌
 
-프로젝트의 배경이 된 주요 참고문헌(치매역학조사, Lancet Commission 보고서, ETRI-Activity3D 등)은 착수보고서를 참고하세요.
+[1] S. van der Endt et al., "Effects of a multidomain lifestyle intervention on cognitive decline in older adults (MIND-PRO)," BMJ Open, 2025.
+[2] Ministry of Health and Welfare, Central Dementia Center, and Korea Institute for Health and Social Affairs, "2023 Dementia Epidemiological Survey and Status Survey Results," Sejong: Ministry of Health and Welfare, 2025.
+[3] G. Livingston et al., "Dementia prevention, intervention, and care: 2020 report of the Lancet Commission," The Lancet, vol. 396, no. 10248, pp. 413-446, 2020.
+[4] J. Lee, J. Kim, J. Lee, S. Lee, S. Lee, and H. Kim, "mHealth Interventions to Increase Physical Activity for Older Adults: A Meta-Analysis of Effectiveness," Korean Journal of Health Education and Promotion, vol. 39, no. 5, pp. 111-126, Dec. 2022.
+[5] P. Krootnark et al., "Effects of low-intensity home-based exercise on cognition in older adults," Frontiers in Medicine, 2024.
+[6] J. Jang et al., "ETRI-Activity3D: A large-scale RGB-D dataset for robots to recognize daily activities of the elderly," in Proc. IEEE/RSJ IROS, 2020.
+[7] T. Duong, "EAR Challenge: Elderly Action Recognition," in Proc. IEEE/CVF WACV Workshops, 2025.
