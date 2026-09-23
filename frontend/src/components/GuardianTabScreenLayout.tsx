@@ -1,7 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
-import { House, Shield, User, Users } from 'lucide-react-native';
+import { House, User, Users } from 'lucide-react-native';
 import { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   colors,
@@ -43,7 +43,11 @@ export default function GuardianTabScreenLayout({
       <View style={styles.appHeader}>
         <Pressable onPress={handleGoHome} style={styles.wordmark}>
           <View style={styles.wordmarkIcon}>
-            <Shield size={16} color={colors.white} />
+            <Image
+              source={require('../../assets/icon.png')}
+              style={styles.wordmarkImage}
+              resizeMode="contain"
+            />
           </View>
           <Text style={styles.wordmarkText}>실버비전</Text>
         </Pressable>
@@ -130,6 +134,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  wordmarkImage: {
+    width: '100%',
+    height: '100%',
   },
   wordmarkText: {
     fontSize: guardianFontSizes.heading,

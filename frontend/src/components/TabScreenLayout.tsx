@@ -1,7 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
-import { Dumbbell, Heart, Home, User } from 'lucide-react-native';
+import { Dumbbell, Home, User } from 'lucide-react-native';
 import { ReactNode, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppMode } from '../context/AppModeContext';
 import SpecialModeDialog, { SPECIAL_MODE_LONG_PRESS_MS } from './SpecialModeDialog';
@@ -46,7 +46,11 @@ export default function TabScreenLayout({ activeTab, children }: TabScreenLayout
       <View style={styles.appHeader}>
         <Pressable onPress={handleGoHome} style={styles.wordmark}>
           <View style={styles.wordmarkIcon}>
-            <Heart size={16} color={colors.white} fill={colors.white} />
+            <Image
+              source={require('../../assets/icon.png')}
+              style={styles.wordmarkImage}
+              resizeMode="contain"
+            />
           </View>
           <Text style={styles.wordmarkText}>실버비전</Text>
         </Pressable>
@@ -144,6 +148,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  wordmarkImage: {
+    width: '100%',
+    height: '100%',
   },
   wordmarkText: {
     fontSize: fontSizes.label,

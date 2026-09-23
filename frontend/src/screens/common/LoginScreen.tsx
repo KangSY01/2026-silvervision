@@ -1,7 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
 import { ArrowLeft, Info, KeyRound, User } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   apiClient,
@@ -93,6 +93,15 @@ export default function LoginScreen() {
           <ArrowLeft size={20} color={colors.textSecondary} strokeWidth={2.5} />
           <Text style={styles.backButtonText}>이전화면</Text>
         </Pressable>
+
+        <View style={styles.logoRow}>
+          <Image
+            source={require('../../../assets/icon.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
+          <Text style={styles.logoText}>실버비전</Text>
+        </View>
 
         <Text style={styles.title}>피보호자 로그인</Text>
         <Text style={styles.subtitle}>어르신의 아이디와 비밀번호를 입력해 주세요.</Text>
@@ -199,6 +208,23 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.subtitle,
     fontWeight: fontWeights.bold,
     color: colors.textSecondary,
+  },
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  logoImage: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.md,
+  },
+  logoText: {
+    fontSize: fontSizes.label,
+    fontWeight: fontWeights.extrabold,
+    color: colors.primary,
+    letterSpacing: -0.5,
   },
   title: {
     fontSize: fontSizes.title,

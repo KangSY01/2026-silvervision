@@ -2,7 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Info, KeyRound, Shield, User } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   apiClient,
@@ -89,6 +89,15 @@ export default function GuardianLoginScreen() {
           <ArrowLeft size={16} color={colors.textSecondary} strokeWidth={2.5} />
           <Text style={styles.backButtonText}>처음으로</Text>
         </Pressable>
+
+        <View style={styles.logoRow}>
+          <Image
+            source={require('../../../assets/icon.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
+          <Text style={styles.logoText}>실버비전</Text>
+        </View>
 
         <View style={styles.badgeRow}>
           <View style={styles.badge}>
@@ -210,6 +219,23 @@ const styles = StyleSheet.create({
     fontSize: guardianFontSizes.label,
     fontWeight: fontWeights.bold,
     color: colors.textSecondary,
+  },
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  logoImage: {
+    width: 24,
+    height: 24,
+    borderRadius: radius.md,
+  },
+  logoText: {
+    fontSize: guardianFontSizes.heading,
+    fontWeight: fontWeights.extrabold,
+    color: colors.primary,
+    letterSpacing: -0.5,
   },
   badgeRow: {
     flexDirection: 'row',
